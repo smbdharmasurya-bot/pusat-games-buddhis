@@ -1,0 +1,6 @@
+{
+  "name": "Pusat Games Buddhis",
+  "description": "Platform Digital Edukasi Game Buddhis Modern dengan Database SQL Terpusat, Real-Time Leaderboard, dan Admin Hub Studio Portable.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

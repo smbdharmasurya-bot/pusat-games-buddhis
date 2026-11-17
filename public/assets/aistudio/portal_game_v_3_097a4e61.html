@@ -1,0 +1,1677 @@
+<!DOCTYPE html>
+<html lang="id" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PUSAT GAMES BUDDHIS - Belajar Dharma, Bermain dengan Bijak</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        deepNavy: '#0F172A',
+                        royalBlue: '#1E40AF',
+                        antiqueGold: '#D97706',
+                        saffronOrange: '#EA580C',
+                        bodhiGreen: '#16A34A'
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        heading: ['Cinzel', 'serif']
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Google Fonts & Font Awesome -->
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@600;700;800&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        .bodhi-leaf-bg {
+            background-image: radial-gradient(#d97706 0.75px, transparent 0.75px);
+            background-size: 24px 24px;
+        }
+    </style>
+</head>
+<body class="bg-slate-50 dark:bg-slate-900 text-slate-800 dark:text-slate-100 font-sans min-h-screen flex flex-col antialiased selection:bg-amber-500 selection:text-white">
+
+    <!-- Toast Notifications Container -->
+    <div id="toast-container" class="fixed bottom-6 right-6 z-[100] flex flex-col gap-2 pointer-events-none"></div>
+
+    <!-- HEADER / NAVIGATION -->
+    <header class="sticky top-0 z-40 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border-b border-slate-200 dark:border-slate-800 transition-all">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+            <div class="flex items-center justify-between h-20">
+                <!-- Brand Logo -->
+                <div class="flex items-center gap-3 cursor-pointer" onclick="switchView('home')">
+                    <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-amber-600 to-orange-500 flex items-center justify-center text-white shadow-lg shadow-amber-500/20">
+                        <i class="fa-solid fa-dharmachakra text-2xl animate-spin-slow"></i>
+                    </div>
+                    <div>
+                        <h1 class="font-heading font-extrabold text-lg sm:text-xl tracking-tight text-slate-900 dark:text-white">
+                            PUSAT GAMES <span class="text-amber-600 dark:text-amber-400">BUDDHIS</span>
+                        </h1>
+                        <p class="text-[10px] text-slate-500 dark:text-slate-400 tracking-wider uppercase font-semibold">Dharma Learning Hub</p>
+                    </div>
+                </div>
+
+                <!-- Desktop Navigation Links -->
+                <nav class="hidden md:flex items-center gap-6 text-sm font-medium">
+                    <button onclick="switchView('home')" class="hover:text-amber-600 dark:hover:text-amber-400 transition">Beranda</button>
+                    <button onclick="switchView('catalog')" class="hover:text-amber-600 dark:hover:text-amber-400 transition">Semua Games</button>
+                    <button onclick="switchView('featured')" class="hover:text-amber-600 dark:hover:text-amber-400 transition">Game Unggulan</button>
+                    <button onclick="switchView('testimonials')" class="hover:text-amber-600 dark:hover:text-amber-400 transition">Testimoni</button>
+                    <button onclick="accessAdminHub()" class="bg-amber-500/10 text-amber-600 dark:text-amber-400 px-3 py-1.5 rounded-xl hover:bg-amber-500 hover:text-white transition font-semibold">
+                        <i class="fa-solid fa-sliders mr-1.5"></i>Admin Hub
+                    </button>
+                </nav>
+
+                <!-- Actions -->
+                <div class="flex items-center gap-3">
+                    <button onclick="toggleDarkMode()" class="p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-amber-400 hover:bg-slate-200 dark:hover:bg-slate-700 transition" title="Ganti Mode Tema">
+                        <i id="theme-icon" class="fa-solid fa-moon"></i>
+                    </button>
+                    <div id="user-auth-container">
+                        <button onclick="openAuthModal('login')" class="hidden sm:inline-flex bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-md shadow-amber-600/20 transition">
+                            <i class="fa-solid fa-right-to-bracket mr-1.5"></i> Masuk / Daftar
+                        </button>
+                    </div>
+                    <button onclick="toggleMobileMenu()" class="md:hidden p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300">
+                        <i class="fa-solid fa-bars text-lg"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Mobile Navigation Menu -->
+        <div id="mobile-menu" class="hidden md:hidden bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 px-4 py-4 space-y-3">
+            <button onclick="switchView('home'); toggleMobileMenu()" class="block w-full text-left py-2 font-medium">Beranda</button>
+            <button onclick="switchView('catalog'); toggleMobileMenu()" class="block w-full text-left py-2 font-medium">Semua Games</button>
+            <button onclick="switchView('featured'); toggleMobileMenu()" class="block w-full text-left py-2 font-medium">Game Unggulan</button>
+            <button onclick="switchView('testimonials'); toggleMobileMenu()" class="block w-full text-left py-2 font-medium">Testimoni</button>
+            <button onclick="accessAdminHub(); toggleMobileMenu()" class="block w-full text-left py-2 font-semibold text-amber-600">Admin Hub Studio</button>
+        </div>
+    </header>
+
+    <!-- MAIN VIEWS CONTAINER -->
+    <main class="flex-grow">
+        <!-- VIEW 1: HOME -->
+        <section id="view-home" class="view-section space-y-16 pb-16">
+            <div class="relative overflow-hidden bg-gradient-to-b from-amber-500/10 via-slate-50 to-slate-50 dark:from-amber-900/20 dark:via-slate-900 dark:to-slate-900 pt-12 pb-16 px-4 sm:px-6 lg:px-8">
+                <div class="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-12 gap-8 items-center">
+                    <div class="lg:col-span-7 space-y-6 text-center lg:text-left">
+                        <div class="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 text-xs font-semibold">
+                            <i class="fa-solid fa-seedling"></i> Platform Digital Learning Experience
+                        </div>
+                        <h1 class="font-heading font-extrabold text-3xl sm:text-5xl tracking-tight text-slate-900 dark:text-white leading-tight">
+                            PUSAT GAMES <span class="text-amber-600 dark:text-amber-400">BUDDHIS</span>
+                        </h1>
+                        <p class="text-base sm:text-lg font-medium text-amber-700 dark:text-amber-300 italic">
+                            "Belajar Dharma, Bermain dengan Bijak, Bertumbuh dalam Kebijaksanaan."
+                        </p>
+                        <p class="text-sm text-slate-600 dark:text-slate-300 max-w-2xl leading-relaxed">
+                            Jelajahi dunia pembelajaran Agama Buddha melalui permainan digital interaktif. Pelajari sejarah, ajaran Tripitaka, nilai moral Sila, dan meditasi berkesadaran secara menyenangkan.
+                        </p>
+                        <div class="flex flex-wrap items-center justify-center lg:justify-start gap-4 pt-2">
+                            <button onclick="switchView('catalog')" class="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white font-semibold text-sm px-6 py-3.5 rounded-2xl shadow-lg shadow-amber-600/25 transition">
+                                JELAJAHI GAMES <i class="fa-solid fa-compass ml-2"></i>
+                            </button>
+                            <button onclick="switchView('featured')" class="bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-200 font-semibold text-sm px-6 py-3.5 rounded-2xl shadow-sm hover:border-amber-500 transition">
+                                GAME POPULER <i class="fa-solid fa-fire text-amber-500 ml-1.5"></i>
+                            </button>
+                        </div>
+
+                        <div class="grid grid-cols-3 gap-4 pt-6 border-t border-slate-200 dark:border-slate-800 text-center lg:text-left">
+                            <div>
+                                <div id="stat-total-games" class="font-heading font-extrabold text-2xl text-amber-600 dark:text-amber-400">0</div>
+                                <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Total Games</div>
+                            </div>
+                            <div>
+                                <div id="stat-total-players" class="font-heading font-extrabold text-2xl text-amber-600 dark:text-amber-400">0</div>
+                                <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Total Pemain</div>
+                            </div>
+                            <div>
+                                <div id="stat-total-categories" class="font-heading font-extrabold text-2xl text-amber-600 dark:text-amber-400">0</div>
+                                <div class="text-[11px] font-medium text-slate-500 uppercase tracking-wider">Kategori</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="lg:col-span-5 flex justify-center">
+                        <div class="relative w-72 h-72 sm:w-80 sm:h-80 rounded-full bg-gradient-to-tr from-amber-500/20 via-orange-400/20 to-transparent p-4 flex items-center justify-center">
+                            <div class="w-full h-full rounded-full border-2 border-dashed border-amber-500/40 flex items-center justify-center overflow-hidden relative shadow-inner">
+                                <div id="hero-graphic-content" class="absolute inset-0 flex items-center justify-center"></div>
+                            </div>
+                            <div class="absolute inset-0 flex flex-col items-center justify-center text-center p-6 space-y-2 pointer-events-none">
+                                <span id="hero-display-emoji" class="text-4xl drop-shadow-md">🪷</span>
+                                <span id="hero-display-title" class="font-heading font-bold text-sm text-slate-800 dark:text-slate-100 bg-white/80 dark:bg-slate-900/80 px-3 py-1 rounded-full shadow-sm">Candi & Stupa Dharma</span>
+                                <span id="hero-display-subtitle" class="text-[11px] text-slate-600 dark:text-slate-300 bg-white/70 dark:bg-slate-900/70 px-2.5 py-0.5 rounded-full">Nilai Kebijaksanaan & Kemurnian</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Home Categories Section -->
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+                <div class="flex items-between items-center justify-between">
+                    <div>
+                        <h2 class="font-heading font-bold text-xl text-slate-900 dark:text-white">Kategori Pembelajaran Buddhis</h2>
+                        <p class="text-xs text-slate-500">Pilih topik pembelajaran Dharma sesuai jenjang peserta didik</p>
+                    </div>
+                    <button onclick="switchView('catalog')" class="text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline">
+                        Lihat Semua <i class="fa-solid fa-arrow-right ml-1"></i>
+                    </button>
+                </div>
+                <div id="home-categories-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7 gap-3"></div>
+            </div>
+
+            <!-- Home Featured Games Section -->
+            <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
+                <div>
+                    <h2 class="font-heading font-bold text-xl text-slate-900 dark:text-white">GAMES PILIHAN TERBAIK</h2>
+                    <p class="text-xs text-slate-500">Permainan edukatif populer dengan rating dan ulasan tertinggi</p>
+                </div>
+                <div id="home-featured-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+            </div>
+        </section>
+
+        <!-- VIEW 2: CATALOG GAMES -->
+        <section id="view-catalog" class="view-section hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+            <div>
+                <h2 class="font-heading font-bold text-2xl text-slate-900 dark:text-white">Katalog Permainan Buddhis</h2>
+                <p class="text-xs text-slate-500">Temukan dan cari berbagai judul game edukatif interaktif</p>
+            </div>
+
+            <div class="bg-white dark:bg-slate-800 p-4 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div>
+                    <label class="text-[11px] font-bold uppercase text-slate-400">Pencarian</label>
+                    <input type="text" id="catalog-search" oninput="renderCatalogGames()" placeholder="Cari nama game..." class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                </div>
+                <div>
+                    <label class="text-[11px] font-bold uppercase text-slate-400">Kategori</label>
+                    <select id="catalog-filter-category" onchange="renderCatalogGames()" class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none"></select>
+                </div>
+                <div>
+                    <label class="text-[11px] font-bold uppercase text-slate-400">Tingkat Kesulitan</label>
+                    <select id="catalog-filter-difficulty" onchange="renderCatalogGames()" class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                        <option value="all">Semua Kesulitan</option>
+                        <option value="Mudah">Mudah</option>
+                        <option value="Sedang">Sedang</option>
+                        <option value="Sangat Sulit">Sangat Sulit</option>
+                    </select>
+                </div>
+            </div>
+
+            <div id="catalog-games-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+        </section>
+
+        <!-- VIEW 3: FEATURED GAMES PAGE -->
+        <section id="view-featured" class="view-section hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+            <div>
+                <h2 class="font-heading font-bold text-2xl text-slate-900 dark:text-white">Game Unggulan Rekomendasi Guru</h2>
+                <p class="text-xs text-slate-500">Permainan interaktif terverifikasi untuk pembelajaran berkesadaran</p>
+            </div>
+            <div id="featured-page-grid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+        </section>
+
+        <!-- VIEW 4: TESTIMONIALS -->
+        <section id="view-testimonials" class="view-section hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                    <h2 class="font-heading font-bold text-2xl text-slate-900 dark:text-white">Ulasan & Testimoni Pengguna</h2>
+                    <p class="text-xs text-slate-500">Pengalaman nyata dari guru, peserta didik, dan pengelola Vihara</p>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
+                <div class="lg:col-span-5 bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
+                    <h3 class="font-heading font-bold text-base text-slate-900 dark:text-white">Kirim Testimoni Anda</h3>
+                    <form onsubmit="submitTestimonial(event)" class="space-y-3">
+                        <div>
+                            <label class="text-[11px] font-bold uppercase text-slate-400">Nama Tampilan</label>
+                            <input type="text" id="testi-name" required placeholder="Contoh: Ani Rahmawati, S.Ag." class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-bold uppercase text-slate-400">Peran Pengguna</label>
+                            <input type="text" id="testi-role" required placeholder="Contoh: Guru Agama Buddha / Siswa" class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-bold uppercase text-slate-400">Game yang Dinilai</label>
+                            <input type="text" id="testi-game" required placeholder="Nama game atau Platform" class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-bold uppercase text-slate-400">Rating Bintang</label>
+                            <select id="testi-rating" class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                                <option value="5">⭐⭐⭐⭐⭐ (5 - Sangat Bagus)</option>
+                                <option value="4">⭐⭐⭐⭐ (4 - Bagus)</option>
+                                <option value="3">⭐⭐⭐ (3 - Cukup)</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label class="text-[11px] font-bold uppercase text-slate-400">Pesan Ulasan</label>
+                            <textarea id="testi-msg" required rows="3" placeholder="Tuliskan pengalaman pembelajaran Anda..." class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none"></textarea>
+                        </div>
+                        <button type="submit" class="w-full py-3 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs shadow transition">
+                            Kirim Testimoni (Modrat Admin)
+                        </button>
+                    </form>
+                </div>
+
+                <div class="lg:col-span-7 space-y-4">
+                    <div id="testimonials-list-container" class="space-y-4"></div>
+                </div>
+            </div>
+        </section>
+
+        <!-- VIEW 5: ADMIN HUB STUDIO -->
+        <section id="view-admin" class="view-section hidden max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 space-y-8">
+            <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-slate-900 text-white p-6 rounded-3xl shadow-xl">
+                <div>
+                    <h2 class="font-heading font-extrabold text-2xl text-amber-400">Admin Hub Studio Pro</h2>
+                    <p class="text-xs text-slate-300">Pusat kendali game portable, kategori dinamis, sertifikat & lisensi SaaS</p>
+                </div>
+                <div class="flex gap-2">
+                    <button onclick="openAddGameModal()" class="bg-gradient-to-r from-amber-500 to-orange-500 text-white text-xs font-bold px-4 py-2.5 rounded-xl shadow hover:opacity-90 transition">
+                        <i class="fa-solid fa-plus mr-1.5"></i> Tambah Game Portable
+                    </button>
+                </div>
+            </div>
+
+            <!-- Admin Sub-Navigation Tabs -->
+            <div class="flex border-b border-slate-200 dark:border-slate-800 space-x-6 text-sm font-semibold overflow-x-auto pb-2">
+                <button onclick="switchAdminTab('games')" class="text-amber-600 dark:text-amber-400 border-b-2 border-amber-600 pb-2">Katalog Games</button>
+                <button onclick="switchAdminTab('categories')" class="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 pb-2">Kelola Kategori & Ikon</button>
+                <button onclick="switchAdminTab('hero')" class="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 pb-2">Pengaturan Hero & Stupa</button>
+                <button onclick="switchAdminTab('testimonials')" class="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 pb-2">Moderasi Testimoni</button>
+                <button onclick="switchAdminTab('licenses')" class="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 pb-2">Lisensi Sekolah/Vihara</button>
+                <button onclick="switchAdminTab('certificates')" class="text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 pb-2">Arsip Sertifikat</button>
+            </div>
+
+            <!-- TAB 1: GAMES MANAGEMENT -->
+            <div id="admin-tab-games" class="admin-tab-content space-y-4">
+                <div class="flex flex-wrap items-center justify-between gap-4 bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-users text-amber-500 text-lg"></i>
+                        <span class="text-xs font-semibold text-slate-700 dark:text-slate-200">Kontrol Statistik Pemain Platform</span>
+                    </div>
+                    <div class="flex flex-wrap items-center gap-2">
+                        <button onclick="resetTotalPlayerStats()" class="bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow transition flex items-center gap-1.5">
+                            <i class="fa-solid fa-rotate-left"></i> Reset Total Pemain (Kecuali Akun Login)
+                        </button>
+                        <button onclick="saveGameData()" class="bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold px-4 py-2 rounded-xl shadow transition flex items-center gap-1.5">
+                            <i class="fa-solid fa-floppy-disk"></i> Simpan Data (Save)
+                        </button>
+                    </div>
+                </div>
+
+                <div class="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-left border-collapse">
+                            <thead>
+                                <tr class="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 text-[11px] font-bold uppercase text-slate-400">
+                                    <th class="py-3 px-4">Judul Game</th>
+                                    <th class="py-3 px-4">Kategori</th>
+                                    <th class="py-3 px-4">Engine</th>
+                                    <th class="py-3 px-4">Jumlah Pemain</th>
+                                    <th class="py-3 px-4">Akses</th>
+                                    <th class="py-3 px-4">Aksi</th>
+                                </tr>
+                            </thead>
+                            <tbody id="admin-games-table-body"></tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+
+            <!-- TAB 2: CATEGORY MANAGEMENT WITH .ico/.webp SUPPORT -->
+            <div id="admin-tab-categories" class="admin-tab-content hidden space-y-6">
+                <div class="bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-4">
+                    <h4 class="font-heading font-bold text-sm text-slate-900 dark:text-white">Tambah Kategori & Ikon Baru</h4>
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                        <div>
+                            <label class="text-[10px] font-bold uppercase text-slate-400">Nama Kategori</label>
+                            <input type="text" id="new-category-input" placeholder="Nama Kategori..." class="w-full mt-1 p-3 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold uppercase text-slate-400">Atau Pilih File Ikon (.ico, .webp)</label>
+                            <input type="file" id="new-category-file-input" accept=".ico,.webp,.png,.jpg" onchange="handleNewCategoryFile(event)" class="w-full mt-1 text-xs text-slate-500 file:py-2 file:px-3 file:rounded-xl file:border-0 file:bg-amber-600 file:text-white cursor-pointer">
+                        </div>
+                        <div>
+                            <label class="text-[10px] font-bold uppercase text-slate-400">Ikon FontAwesome (Cth: fa-om)</label>
+                            <input type="text" id="new-category-icon-input" placeholder="fa-om" class="w-full mt-1 p-3 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                        </div>
+                    </div>
+                    <button onclick="addNewCategory()" class="bg-amber-600 text-white px-5 py-3 rounded-xl text-xs font-bold shadow hover:bg-amber-700 transition">
+                        <i class="fa-solid fa-folder-plus mr-1.5"></i> Tambah Kategori
+                    </button>
+                </div>
+
+                <div class="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+                    <table class="w-full text-left border-collapse">
+                        <thead>
+                            <tr class="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 text-[11px] font-bold uppercase text-slate-400">
+                                <th class="py-3 px-4">Ikon</th>
+                                <th class="py-3 px-4">Nama Kategori</th>
+                                <th class="py-3 px-4">Jumlah Game Terkait</th>
+                                <th class="py-3 px-4">Tindakan</th>
+                            </tr>
+                        </thead>
+                        <tbody id="admin-categories-table-body"></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- TAB 3: HERO & STUPA CONFIG -->
+            <div id="admin-tab-hero" class="admin-tab-content hidden bg-white dark:bg-slate-800 p-6 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-6">
+                <div>
+                    <h3 class="font-heading font-bold text-base text-slate-900 dark:text-white">Pengaturan Hiasan & Teks Stupa/Candi (Hero Section)</h3>
+                    <p class="text-xs text-slate-500 mt-0.5">Ubah gambar hiasan, ikon/emoji, serta tulisan utama pada banner beranda.</p>
+                </div>
+                <form onsubmit="saveHeroConfig(event)" class="space-y-4 max-w-xl">
+                    <div>
+                        <label class="text-[11px] font-bold uppercase text-slate-400">Judul Banner</label>
+                        <input type="text" id="hero-input-title" required class="w-full mt-1 p-3 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="text-[11px] font-bold uppercase text-slate-400">Subjudul Banner</label>
+                        <input type="text" id="hero-input-subtitle" required class="w-full mt-1 p-3 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                    </div>
+                    <div>
+                        <label class="text-[11px] font-bold uppercase text-slate-400">Emoji / Ikon Utama</label>
+                        <input type="text" id="hero-input-emoji" placeholder="🪷" class="w-full mt-1 p-3 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                    </div>
+                    <div class="p-4 rounded-2xl bg-slate-100 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 space-y-2">
+                        <label class="text-[11px] font-bold uppercase text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                            <i class="fa-solid fa-image"></i> Unggah Gambar Hiasan Stupa/Candi (.png, .jpg)
+                        </label>
+                        <input type="file" id="hero-file-input" accept="image/*" onchange="handleHeroImageUpload(event)" class="w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-amber-600 file:text-white hover:file:bg-amber-700 cursor-pointer">
+                        <div id="hero-preview-container" class="hidden mt-2">
+                            <img id="hero-preview-img" src="" alt="Preview" class="w-32 h-32 object-cover rounded-2xl shadow">
+                        </div>
+                    </div>
+                    <button type="submit" class="w-full py-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs shadow transition">
+                        Simpan Perubahan Beranda (Hero)
+                    </button>
+                </form>
+            </div>
+
+            <!-- TAB 4: TESTIMONIALS -->
+            <div id="admin-tab-testimonials" class="admin-tab-content hidden bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 text-[11px] font-bold uppercase text-slate-400">
+                            <th class="py-3 px-4">Pengirim</th>
+                            <th class="py-3 px-4">Pesan Ulasan</th>
+                            <th class="py-3 px-4">Status</th>
+                            <th class="py-3 px-4">Moderasi</th>
+                        </tr>
+                    </thead>
+                    <tbody id="admin-testi-table-body"></tbody>
+                </table>
+            </div>
+
+            <!-- TAB 5: LICENSES -->
+            <div id="admin-tab-licenses" class="admin-tab-content hidden bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 text-[11px] font-bold uppercase text-slate-400">
+                            <th class="py-3 px-4">Nama Sekolah / Vihara</th>
+                            <th class="py-3 px-4">Paket Lisensi</th>
+                            <th class="py-3 px-4">Status</th>
+                            <th class="py-3 px-4">Berlaku Hingga</th>
+                        </tr>
+                    </thead>
+                    <tbody id="admin-licenses-table-body"></tbody>
+                </table>
+            </div>
+
+            <!-- TAB 6: CERTIFICATES -->
+            <div id="admin-tab-certificates" class="admin-tab-content hidden bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm">
+                <table class="w-full text-left border-collapse">
+                    <thead>
+                        <tr class="bg-slate-50 dark:bg-slate-900 border-b border-slate-200 dark:border-slate-700 text-[11px] font-bold uppercase text-slate-400">
+                            <th class="py-3 px-4">ID Sertifikat</th>
+                            <th class="py-3 px-4">Nama Siswa</th>
+                            <th class="py-3 px-4">Modul Pembelajaran</th>
+                            <th class="py-3 px-4">Tanggal Terbit</th>
+                        </tr>
+                    </thead>
+                    <tbody id="admin-certificates-table-body"></tbody>
+                </table>
+            </div>
+        </section>
+    </main>
+
+    <!-- MODAL: GAME PLAYER FULLSCREEN -->
+    <div id="game-player-modal" class="fixed inset-0 z-50 bg-slate-950 hidden flex flex-col">
+        <div class="bg-slate-900/90 border-b border-slate-800 px-6 py-3 flex items-center justify-between text-white">
+            <div class="flex items-center gap-3">
+                <i class="fa-solid fa-gamepad text-amber-400 text-xl"></i>
+                <div>
+                    <h3 id="player-game-title" class="font-heading font-bold text-sm sm:text-base text-amber-400">Judul Game</h3>
+                    <p id="player-game-subtitle" class="text-[11px] text-slate-400">Mode Layar Penuh Interaktif</p>
+                </div>
+            </div>
+            <div class="flex items-center gap-2">
+                <button onclick="toggleNativeFullscreen()" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-slate-300 font-medium">
+                    <i class="fa-solid fa-expand mr-1"></i> Layar Penuh
+                </button>
+                <button onclick="closeGameModal()" class="px-4 py-1.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-xs text-white font-bold shadow">
+                    <i class="fa-solid fa-xmark mr-1"></i> Tutup & Kembali
+                </button>
+            </div>
+        </div>
+        <div id="game-player-container" class="flex-grow w-full bg-slate-900 flex items-center justify-center p-2 sm:p-6 overflow-hidden"></div>
+    </div>
+
+    <!-- MODAL: ADD PORTABLE GAME -->
+    <div id="add-game-modal" class="fixed inset-0 z-50 bg-slate-900/70 backdrop-blur-sm hidden flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-slate-800 rounded-3xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-4 max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center border-b border-slate-200 dark:border-slate-700 pb-3">
+                <h3 class="font-heading font-bold text-lg text-slate-900 dark:text-white">Tambah Game Portable Web Browser</h3>
+                <button onclick="closeAddGameModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <form onsubmit="saveNewGame(event)" class="space-y-3">
+                <div class="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/20 space-y-2">
+                    <label class="text-[11px] font-bold uppercase text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
+                        <i class="fa-solid fa-file-code"></i> Unggah File Game Portable (.html, .html5, .json, .js)
+                    </label>
+                    <input type="file" id="new-game-file-input" accept=".html,.html5,.json,.js" onchange="handlePortableGameFileUpload(event)" class="w-full text-xs text-slate-500 file:mr-3 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-xs file:font-semibold file:bg-amber-600 file:text-white hover:file:bg-amber-700 cursor-pointer">
+                    <p class="text-[10px] text-slate-500">Mendukung file game HTML5 standalone, skrip JS, atau file JSON konfigurasi paket game portable.</p>
+                </div>
+
+                <div>
+                    <label class="text-[11px] font-bold uppercase text-slate-400">Judul Permainan</label>
+                    <input type="text" id="new-game-title" required placeholder="Contoh: Kuis Delapan Jalan Mulia" class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                </div>
+
+                <div class="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-900/60 border border-slate-200 dark:border-slate-700 space-y-2">
+                    <label class="text-[11px] font-bold uppercase text-amber-600 dark:text-amber-400 flex items-center gap-1.5">
+                        <i class="fa-solid fa-image"></i> Unggah Thumbnail / Gambar Sampul Game
+                    </label>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        <div>
+                            <span class="text-[10px] text-slate-400 block mb-1">Upload File Gambar</span>
+                            <input type="file" id="new-game-thumb-file" accept="image/*" onchange="handleThumbnailFileUpload(event)" class="w-full text-[11px] text-slate-500 file:mr-2 file:py-1.5 file:px-3 file:rounded-xl file:border-0 file:text-[11px] file:font-semibold file:bg-amber-600 file:text-white hover:file:bg-amber-700 cursor-pointer">
+                        </div>
+                        <div>
+                            <span class="text-[10px] text-slate-400 block mb-1">atau Tautan URL Gambar</span>
+                            <input type="url" id="new-game-thumb-url" placeholder="https://..." class="w-full p-2.5 rounded-xl bg-white dark:bg-slate-800 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                        </div>
+                    </div>
+                    <div id="thumb-preview-box" class="hidden mt-2 flex items-center gap-2 p-2 rounded-xl bg-slate-200 dark:bg-slate-800">
+                        <img id="thumb-preview-img" src="" alt="Preview" class="w-12 h-8 object-cover rounded-lg">
+                        <span class="text-[10px] text-slate-600 dark:text-slate-300 font-semibold">Thumbnail Terpilih</span>
+                    </div>
+                </div>
+
+                <div>
+                    <label class="text-[11px] font-bold uppercase text-slate-400">Kategori</label>
+                    <select id="new-game-category" required class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none"></select>
+                </div>
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="text-[11px] font-bold uppercase text-slate-400">Tingkat Kesulitan</label>
+                        <select id="new-game-difficulty" class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                            <option value="Mudah">Mudah</option>
+                            <option value="Sedang">Sedang</option>
+                            <option value="Sangat Sulit">Sangat Sulit</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="text-[11px] font-bold uppercase text-slate-400">Engine / Tipe Game</label>
+                        <select id="new-game-type" onchange="toggleGameInputFields()" class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                            <option value="html5">HTML5 / Web Portable Code</option>
+                            <option value="quiz">Kuis Interaktif</option>
+                            <option value="memory">Memory Match Card</option>
+                            <option value="iframe">URL Embed Iframe</option>
+                        </select>
+                    </div>
+                </div>
+                <div id="field-game-url" class="hidden">
+                    <label class="text-[11px] font-bold uppercase text-slate-400">URL Game Embed Iframe</label>
+                    <input type="url" id="new-game-url" placeholder="https://..." class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                </div>
+                <div id="field-game-html5">
+                    <label class="text-[11px] font-bold uppercase text-slate-400">Kode Script Portable HTML5</label>
+                    <textarea id="new-game-html5" rows="5" placeholder="<div id='game'>...</div><script>...</script>" class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs font-mono focus:ring-2 focus:ring-amber-500 outline-none"></textarea>
+                </div>
+                <div>
+                    <label class="text-[11px] font-bold uppercase text-slate-400">Deskripsi Singkat</label>
+                    <textarea id="new-game-desc" required rows="2" placeholder="Tujuan dan gambaran game..." class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none"></textarea>
+                </div>
+                <div class="flex items-center gap-2 pt-1">
+                    <input type="checkbox" id="new-game-premium" class="rounded text-amber-600 focus:ring-amber-500">
+                    <label for="new-game-premium" class="text-xs font-semibold text-slate-700 dark:text-slate-300">Set sebagai Game PRO / Premium Access</label>
+                </div>
+                <button type="submit" class="w-full py-3 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs shadow transition">
+                    Simpan & Publikasikan Game
+                </button>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: ADMIN PASSWORD GATE -->
+    <div id="admin-pass-modal" class="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-4 text-center">
+            <div class="w-14 h-14 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center text-2xl mx-auto">
+                <i class="fa-solid fa-user-shield"></i>
+            </div>
+            <div>
+                <h3 class="font-heading font-bold text-lg text-slate-900 dark:text-white">Akses Admin Hub Studio</h3>
+                <p class="text-xs text-slate-500 mt-1">Masukkan kata sandi administrator untuk melanjutkan.</p>
+            </div>
+            <form onsubmit="verifyAdminPassword(event)" class="space-y-3">
+                <input type="password" id="admin-password-input" required placeholder="Kata Sandi Admin..." class="w-full p-3 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs text-center focus:ring-2 focus:ring-amber-500 outline-none font-mono">
+                <div class="flex gap-2">
+                    <button type="button" onclick="closeAdminPassModal()" class="w-1/2 py-2.5 rounded-xl bg-slate-200 dark:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-semibold">Batal</button>
+                    <button type="submit" class="w-1/2 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-semibold shadow">Masuk Admin</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL: USER AUTHENTICATION -->
+    <div id="auth-modal" class="fixed inset-0 z-50 bg-slate-900/80 backdrop-blur-sm hidden flex items-center justify-center p-4">
+        <div class="bg-white dark:bg-slate-800 rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-700 space-y-4">
+            <div class="flex justify-between items-center border-b border-slate-200 dark:border-slate-700 pb-3">
+                <h3 id="auth-modal-title" class="font-heading font-bold text-base text-slate-900 dark:text-white">Masuk Akun</h3>
+                <button onclick="closeAuthModal()" class="text-slate-400 hover:text-slate-600"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <button onclick="handleGoogleSignIn()" class="w-full py-2.5 px-4 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-900 text-slate-700 dark:text-slate-200 text-xs font-semibold flex items-center justify-center gap-2 hover:bg-slate-100 dark:hover:bg-slate-800 transition">
+                <i class="fa-brands fa-google text-rose-500"></i> Masuk dengan Akun Google
+            </button>
+            <div class="relative flex py-1 items-center">
+                <div class="flex-grow border-t border-slate-200 dark:border-slate-700"></div>
+                <span class="flex-shrink mx-3 text-[10px] text-slate-400 font-semibold uppercase">atau</span>
+                <div class="flex-grow border-t border-slate-200 dark:border-slate-700"></div>
+            </div>
+            <form onsubmit="handleEmailAuth(event)" class="space-y-3">
+                <div id="auth-name-field" class="hidden">
+                    <label class="text-[11px] font-bold uppercase text-slate-400">Nama Lengkap</label>
+                    <input type="text" id="auth-name-input" placeholder="Nama Anda" class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                </div>
+                <div>
+                    <label class="text-[11px] font-bold uppercase text-slate-400">Email</label>
+                    <input type="email" id="auth-email-input" required placeholder="email@contoh.com" class="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-900 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none">
+                </div>
+                <button type="submit" id="auth-submit-btn" class="w-full py-3 rounded-xl bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs shadow transition">Masuk Sekarang</button>
+            </form>
+            <div class="text-center pt-2 text-xs text-slate-500">
+                <span id="auth-toggle-text">Belum punya akun?</span>
+                <button onclick="toggleAuthMode()" id="auth-toggle-btn" class="text-amber-600 font-semibold hover:underline ml-1">Daftar Akun Baru</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- FOOTER -->
+    <footer class="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-10 mt-auto">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 text-center space-y-4">
+            <div class="flex items-center justify-center gap-2">
+                <i class="fa-solid fa-dharmachakra text-amber-600 dark:text-amber-400 text-xl"></i>
+                <span class="font-heading font-extrabold text-base tracking-tight text-slate-900 dark:text-white">PUSAT GAMES BUDDHIS</span>
+            </div>
+            <p class="text-xs text-slate-500 italic max-w-lg mx-auto">"Belajar Dharma, Bermain dengan Bijak, Bertumbuh dalam Kebijaksanaan."</p>
+            <p class="text-[11px] text-slate-400">&copy; 2026 Pusat Games Buddhis Indonesia. All rights reserved.</p>
+        </div>
+    </footer>
+
+    <!-- JAVASCRIPT LOGIC -->
+    <script>
+        const defaultCategories = [
+            { name: "Pengenalan Agama Buddha", icon: "fa-seedling" },
+            { name: "Sejarah Agama Buddha", icon: "fa-landmark" },
+            { name: "Riwayat Hidup Pangeran Siddhartha", icon: "fa-person-walking" },
+            { name: "Buddha, Dhamma, dan Sangha", icon: "fa-dharmachakra" },
+            { name: "Empat Kebenaran Mulia", icon: "fa-gem" },
+            { name: "Jalan Mulia Berunsur Delapan", icon: "fa-map-signs" },
+            { name: "Pancasila Buddhis", icon: "fa-shield-halved" },
+            { name: "Tripitaka dan Ajaran Buddha", icon: "fa-book-open" },
+            { name: "Hari Raya Agama Buddha", icon: "fa-calendar-day" },
+            { name: "Tempat Suci dan Ziarah Buddhis", icon: "fa-place-of-worship" },
+            { name: "Budaya dan Tradisi Buddhis Indonesia", icon: "fa-gopuram" },
+            { name: "Etika, Moralitas, dan Karakter", icon: "fa-heart" },
+            { name: "Meditasi dan Hidup Berkesadaran", icon: "fa-om" },
+            { name: "Kuis Pengetahuan Buddhis", icon: "fa-circle-question" }
+        ];
+
+        let rawCategories = JSON.parse(localStorage.getItem('pgb_categories_db')) || defaultCategories;
+        let categories = rawCategories.map(c => typeof c === 'string' ? { name: c, icon: "fa-seedling" } : c);
+
+        let heroConfig = JSON.parse(localStorage.getItem('pgb_hero_config')) || {
+            title: "Candi & Stupa Dharma",
+            subtitle: "Nilai Kebijaksanaan & Kemurnian",
+            emoji: "🪷",
+            imageUrl: ""
+        };
+
+        const initialGames = [
+            {
+                id: 1,
+                title: "Kuis Perjalanan Siddhartha",
+                category: "Riwayat Hidup Pangeran Siddhartha",
+                difficulty: "Mudah",
+                rating: 4.9,
+                players: 420,
+                type: "quiz",
+                thumbnail: "https://images.unsplash.com/photo-1609743522653-52354461eb27?auto=format&fit=crop&w=600&q=80",
+                desc: "Uji pengetahuan Anda mengenai kisah Pangeran Siddhartha dari Istana Kapilawastu hingga mencapai Penerangan Sempurna di Bodh Gaya.",
+                featured: true
+            },
+            {
+                id: 2,
+                title: "Memory Candi Borobudur",
+                category: "Tempat Suci dan Ziarah Buddhis",
+                difficulty: "Sedang",
+                rating: 4.95,
+                players: 580,
+                type: "memory",
+                thumbnail: "https://images.unsplash.com/photo-1596402184320-417e7178b2cd?auto=format&fit=crop&w=600&q=80",
+                desc: "Temukan pasangan kartu relief dan stupa suci candi Buddha bersejarah di Indonesia untuk mengasah konsentrasi.",
+                featured: true
+            },
+            {
+                id: 3,
+                title: "Misteri Empat Kebenaran Mulia",
+                category: "Empat Kebenaran Mulia",
+                difficulty: "Sedang",
+                rating: 4.8,
+                players: 310,
+                type: "quiz",
+                thumbnail: "https://images.unsplash.com/photo-1508672019048-805479768538?auto=format&fit=crop&w=600&q=80",
+                desc: "Pelajari makna Dukkha, Samudaya, Nirodha, dan Magga melalui petualangan kuis interaktif yang penuh kebijaksanaan.",
+                featured: true
+            },
+            {
+                id: 4,
+                title: "Refleks Teratai Suci (HTML5)",
+                category: "Meditasi dan Hidup Berkesadaran",
+                difficulty: "Mudah",
+                rating: 4.9,
+                players: 210,
+                type: "html5",
+                thumbnail: "https://images.unsplash.com/photo-1509198397868-475647b2a1e5?auto=format&fit=crop&w=600&q=80",
+                desc: "Game portable HTML5 standalone. Tangkap bunga teratai mekar untuk melatih fokus dan kecermatan pikiran.",
+                featured: true,
+                html5Code: `
+                    <!DOCTYPE html>
+                    <html>
+                    <head>
+                        <style>
+                            body { background: #0f172a; color: #fff; text-align: center; font-family: sans-serif; padding: 20px; }
+                            h3 { color: #d97706; font-size: 20px; font-weight: bold; margin-bottom: 5px; }
+                            #game-box { width: 100%; max-width: 400px; height: 280px; background: #1e293b; border-radius: 16px; margin: 20px auto; position: relative; overflow: hidden; border: 2px solid #334155; }
+                            #target { font-size: 45px; cursor: pointer; position: absolute; user-select: none; transition: transform 0.1s; }
+                            #target:active { transform: scale(0.9); }
+                            p { font-size: 14px; color: #94a3b8; }
+                        </style>
+                    </head>
+                    <body>
+                        <h3>Refleks Teratai Suci</h3>
+                        <p>Klik bunga teratai 🪷 secepat mungkin!</p>
+                        <div id="game-box">
+                            <span id="target">🪷</span>
+                        </div>
+                        <p style="font-weight:bold; font-size:16px; color:#f59e0b;" id="score-text">Skor: 0</p>
+                        <script>
+                            let score = 0;
+                            const target = document.getElementById('target');
+                            const scoreText = document.getElementById('score-text');
+                            function moveTarget() {
+                                const x = Math.random() * 320;
+                                const y = Math.random() * 200;
+                                target.style.left = x + 'px';
+                                target.style.top = y + 'px';
+                            }
+                            target.onclick = function() {
+                                score++;
+                                scoreText.innerText = 'Skor Teratai: ' + score;
+                                moveTarget();
+                            };
+                            moveTarget();
+                        <\/script>
+                    </body>
+                    </html>
+                `
+            },
+            {
+                id: 5,
+                title: "Pancasila Buddhis & Etika Harian",
+                category: "Pancasila Buddhis",
+                difficulty: "Mudah",
+                rating: 4.85,
+                players: 490,
+                type: "quiz",
+                desc: "Simulasi penerapan 5 latihan kemoralan (Sila) dalam dilema etika kehidupan modern.",
+                featured: true
+            },
+            {
+                id: 6,
+                title: "Mengenal Hari Raya Waisak & Asadha",
+                category: "Hari Raya Agama Buddha",
+                difficulty: "Mudah",
+                rating: 4.9,
+                players: 610,
+                type: "quiz",
+                desc: "Kuis interaktif seputar makna Trisuci Waisak, Kathina, Asadha, dan Magha Puja.",
+                featured: true
+            }
+        ];
+
+        let gamesDB = JSON.parse(localStorage.getItem('pgb_games_db')) || initialGames;
+        let testimonialsDB = JSON.parse(localStorage.getItem('pgb_testimonials_db')) || [
+            {
+                id: 1,
+                name: "Bhikkhu Dhammacaro",
+                role: "Guru Agama Buddha / Vihara",
+                game: "Platform Keseluruhan",
+                rating: 5,
+                message: "Platform ini sangat luar biasa! Dukungan game portable memudahkan penambahan materi pembelajaran baru.",
+                status: "approved"
+            },
+            {
+                id: 2,
+                name: "Dewi Lestari, S.Ag.",
+                role: "Guru Agama Buddha",
+                game: "Kuis Perjalanan Siddhartha",
+                rating: 5,
+                message: "Anak-anak sangat antusias mengerjakan kuis ini di kelas. Materi yang disajikan akurat dan sesuai kurikulum.",
+                status: "approved"
+            }
+        ];
+
+        let licensesDB = JSON.parse(localStorage.getItem('pgb_licenses_db')) || [
+            { id: 1, name: "SMP Maitreyawira Jakarta", plan: "Pro School License", status: "Aktif", expires: "2027-12-31" },
+            { id: 2, name: "Vihara Mendut Magelang", plan: "Vihara Learning Pack", status: "Aktif", expires: "2028-06-30" }
+        ];
+
+        let certificatesDB = JSON.parse(localStorage.getItem('pgb_certificates_db')) || [
+            { id: "CERT-2026-001", student: "Ananda Budi Santoso", module: "Dasar-Dasar Tripitaka", institution: "Vihara Buddhayana", date: "2026-03-15" }
+        ];
+
+        function showToast(message, type = "info") {
+            const container = document.getElementById('toast-container');
+            if (!container) return;
+            const toast = document.createElement('div');
+            const bgClass = type === 'success' ? 'bg-emerald-600' : type === 'warning' ? 'bg-amber-600' : 'bg-royalBlue';
+            toast.className = `${bgClass} text-white text-xs font-semibold px-4 py-3 rounded-2xl shadow-xl flex items-center gap-2 pointer-events-auto transition duration-300 transform translate-y-2 opacity-0`;
+            toast.innerHTML = `<i class="fa-solid ${type === 'success' ? 'fa-circle-check' : 'fa-circle-info'}"></i> <span>${message}</span>`;
+            container.appendChild(toast);
+            setTimeout(() => { toast.classList.remove('translate-y-2', 'opacity-0'); }, 10);
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            }, 3500);
+        }
+
+        function switchView(viewName) {
+            document.querySelectorAll('.view-section').forEach(sec => sec.classList.add('hidden'));
+            const target = document.getElementById(`view-${viewName}`);
+            if (target) {
+                target.classList.remove('hidden');
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+            }
+        }
+
+        function toggleDarkMode() {
+            document.documentElement.classList.toggle('dark');
+            const icon = document.getElementById('theme-icon');
+            if (icon) {
+                icon.className = document.documentElement.classList.contains('dark') ? 'fa-solid fa-sun text-amber-400' : 'fa-solid fa-moon text-lg';
+            }
+        }
+
+        function toggleMobileMenu() {
+            const menu = document.getElementById('mobile-menu');
+            if (menu) menu.classList.toggle('hidden');
+        }
+
+        function renderHeroSection() {
+            const titleEl = document.getElementById('hero-display-title');
+            const subtitleEl = document.getElementById('hero-display-subtitle');
+            const emojiEl = document.getElementById('hero-display-emoji');
+            const graphicContent = document.getElementById('hero-graphic-content');
+
+            if (titleEl) titleEl.innerText = heroConfig.title;
+            if (subtitleEl) subtitleEl.innerText = heroConfig.subtitle;
+            if (emojiEl) emojiEl.innerText = heroConfig.emoji || '🪷';
+
+            if (graphicContent) {
+                if (heroConfig.imageUrl && heroConfig.imageUrl.trim() !== '') {
+                    graphicContent.innerHTML = `<img src="${heroConfig.imageUrl}" alt="Hiasan Stupa Candi" class="w-full h-full object-cover">`;
+                    if (emojiEl) emojiEl.classList.add('hidden');
+                } else {
+                    graphicContent.innerHTML = `<i class="fa-solid fa-dharmachakra text-8xl text-amber-600/30 dark:text-amber-400/20 animate-spin-slow"></i>`;
+                    if (emojiEl) emojiEl.classList.remove('hidden');
+                }
+            }
+
+            const inputTitle = document.getElementById('hero-input-title');
+            const inputSub = document.getElementById('hero-input-subtitle');
+            const inputEmoji = document.getElementById('hero-input-emoji');
+            if (inputTitle) inputTitle.value = heroConfig.title;
+            if (inputSub) inputSub.value = heroConfig.subtitle;
+            if (inputEmoji) inputEmoji.value = heroConfig.emoji;
+        }
+
+        let uploadedHeroImageBase64 = "";
+        function handleHeroImageUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                uploadedHeroImageBase64 = e.target.result;
+                const container = document.getElementById('hero-preview-container');
+                const img = document.getElementById('hero-preview-img');
+                if (container && img) {
+                    img.src = uploadedHeroImageBase64;
+                    container.classList.remove('hidden');
+                }
+                showToast("Gambar hiasan stupa/candi berhasil diunggah!", "success");
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function saveHeroConfig(e) {
+            e.preventDefault();
+            const title = document.getElementById('hero-input-title').value.trim();
+            const subtitle = document.getElementById('hero-input-subtitle').value.trim();
+            const emoji = document.getElementById('hero-input-emoji').value.trim();
+
+            heroConfig.title = title || heroConfig.title;
+            heroConfig.subtitle = subtitle || heroConfig.subtitle;
+            heroConfig.emoji = emoji || '🪷';
+            if (uploadedHeroImageBase64) {
+                heroConfig.imageUrl = uploadedHeroImageBase64;
+            }
+
+            localStorage.setItem('pgb_hero_config', JSON.stringify(heroConfig));
+            renderHeroSection();
+            showToast("Pengaturan Beranda (Hero & Stupa) berhasil disimpan!", "success");
+        }
+
+        function populateCategorySelects() {
+            const catalogSelect = document.getElementById('catalog-filter-category');
+            if (catalogSelect) {
+                catalogSelect.innerHTML = '<option value="all">Semua Kategori</option>' +
+                    categories.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+            }
+            const addGameSelect = document.getElementById('new-game-category');
+            if (addGameSelect) {
+                addGameSelect.innerHTML = categories.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+            }
+        }
+
+        // Helper to render icon supporting FontAwesome class or .ico/.webp/image base64/url
+        function renderCategoryIconElement(iconVal) {
+            if (!iconVal) iconVal = 'fa-seedling';
+            if (iconVal.startsWith('fa-') || (!iconVal.includes('.') && !iconVal.startsWith('http') && !iconVal.startsWith('data:'))) {
+                return `<i class="fa-solid ${iconVal}"></i>`;
+            } else {
+                return `<img src="${iconVal}" alt="Icon" class="w-7 h-7 object-contain rounded">`;
+            }
+        }
+
+        function renderHomeCategories() {
+            const container = document.getElementById('home-categories-grid');
+            if (!container) return;
+            container.innerHTML = categories.map((cat) => `
+                <div onclick="switchView('catalog'); filterByCategory('${cat.name}')" class="bg-white dark:bg-slate-800 p-4 rounded-2xl border border-slate-200 dark:border-slate-700 hover:border-amber-500 hover:shadow-md cursor-pointer transition text-center space-y-2 group">
+                    <div class="w-10 h-10 rounded-xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center text-lg mx-auto group-hover:bg-amber-500 group-hover:text-white transition">
+                        ${renderCategoryIconElement(cat.icon)}
+                    </div>
+                    <h4 class="font-bold text-xs line-clamp-2 text-slate-800 dark:text-slate-200">${cat.name}</h4>
+                </div>
+            `).join('');
+        }
+
+        function filterByCategory(catName) {
+            const catSelect = document.getElementById('catalog-filter-category');
+            if (catSelect) {
+                catSelect.value = catName;
+                renderCatalogGames();
+            }
+        }
+
+        function createGameCardHTML(game) {
+            const fallbackThumbnail = `https://placehold.co/600x340/0f172a/d97706?text=${encodeURIComponent(game.title)}`;
+            const thumbUrl = game.thumbnail && game.thumbnail.trim() !== '' ? game.thumbnail : fallbackThumbnail;
+
+            return `
+                <div class="bg-white dark:bg-slate-800 rounded-3xl border border-slate-200 dark:border-slate-700 overflow-hidden shadow-sm hover:shadow-xl transition flex flex-col justify-between group">
+                    <div>
+                        <div class="relative h-44 w-full overflow-hidden bg-slate-900">
+                            <img src="${thumbUrl}" alt="${game.title}" onerror="this.onerror=null; this.src='${fallbackThumbnail}'" class="w-full h-full object-cover group-hover:scale-105 transition duration-500">
+                            <div class="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent"></div>
+                            <div class="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none">
+                                <span class="text-[10px] font-semibold bg-slate-900/80 backdrop-blur-md text-amber-400 px-3 py-1 rounded-full border border-amber-500/20">${game.category}</span>
+                                ${game.isPremium ? '<span class="text-[10px] bg-amber-500 text-white font-bold px-2.5 py-0.5 rounded-full shadow-md"><i class="fa-solid fa-crown mr-1"></i>PRO</span>' : '<span class="text-[10px] bg-emerald-500/90 text-white font-bold px-2.5 py-0.5 rounded-full shadow-md">GRATIS</span>'}
+                            </div>
+                            <div class="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white text-xs font-medium">
+                                <span class="bg-slate-950/70 backdrop-blur-md px-2.5 py-1 rounded-xl text-[11px]"><i class="fa-solid fa-star text-amber-400 mr-1"></i>${game.rating}</span>
+                                <span class="bg-slate-950/70 backdrop-blur-md px-2.5 py-1 rounded-xl text-[11px]"><i class="fa-solid fa-users text-slate-300 mr-1"></i>${game.players}</span>
+                            </div>
+                        </div>
+
+                        <div class="p-5 space-y-2">
+                            <h3 class="font-heading font-bold text-base text-slate-800 dark:text-slate-100 group-hover:text-amber-600 transition leading-snug">${game.title}</h3>
+                            <p class="text-xs text-slate-500 dark:text-slate-400 line-clamp-2">${game.desc}</p>
+                        </div>
+                    </div>
+                    <div class="p-4 bg-slate-50 dark:bg-slate-900/50 border-t border-slate-100 dark:border-slate-700/60 flex items-center justify-between">
+                        <span class="text-[10px] font-mono font-bold text-slate-400 uppercase bg-slate-200 dark:bg-slate-800 px-2.5 py-1 rounded-lg"><i class="fa-solid fa-gamepad mr-1 text-amber-500"></i>${game.type}</span>
+                        <button onclick="launchGameById(${game.id})" class="bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white text-xs font-semibold px-4 py-2 rounded-xl shadow transition">
+                            Main Sekarang <i class="fa-solid fa-play ml-1"></i>
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderFeaturedGames() {
+            const featuredList = gamesDB.filter(g => g.featured);
+            const homeGrid = document.getElementById('home-featured-grid');
+            const pageGrid = document.getElementById('featured-page-grid');
+            const html = featuredList.map(g => createGameCardHTML(g)).join('');
+            if (homeGrid) homeGrid.innerHTML = html;
+            if (pageGrid) pageGrid.innerHTML = html;
+        }
+
+        function renderCatalogGames() {
+            const grid = document.getElementById('catalog-games-grid');
+            if (!grid) return;
+            const search = (document.getElementById('catalog-search')?.value || '').toLowerCase();
+            const cat = document.getElementById('catalog-filter-category')?.value || 'all';
+            const diff = document.getElementById('catalog-filter-difficulty')?.value || 'all';
+
+            const filtered = gamesDB.filter(g => {
+                const matchSearch = g.title.toLowerCase().includes(search) || g.desc.toLowerCase().includes(search);
+                const matchCat = cat === 'all' || g.category === cat;
+                const matchDiff = diff === 'all' || g.difficulty === diff;
+                return matchSearch && matchCat && matchDiff;
+            });
+
+            if (filtered.length === 0) {
+                grid.innerHTML = `<div class="col-span-full text-center py-12 text-slate-400 font-medium text-sm">Tidak ada game yang sesuai dengan kriteria pencarian.</div>`;
+            } else {
+                grid.innerHTML = filtered.map(g => createGameCardHTML(g)).join('');
+            }
+        }
+
+        function renderTestimonials() {
+            const container = document.getElementById('testimonials-list-container');
+            if (!container) return;
+            const approved = testimonialsDB.filter(t => t.status === 'approved');
+
+            if (approved.length === 0) {
+                container.innerHTML = `<div class="text-center py-8 text-slate-400 text-xs italic">Belum ada testimoni. Jadilah pengguna pertama yang memberikan ulasan.</div>`;
+                return;
+            }
+
+            container.innerHTML = approved.map(t => `
+                <div class="bg-white dark:bg-slate-800 p-5 rounded-3xl border border-slate-200 dark:border-slate-700 shadow-sm space-y-2">
+                    <div class="flex items-center justify-between">
+                        <div>
+                            <h4 class="font-heading font-bold text-sm text-slate-800 dark:text-slate-100">${t.name}</h4>
+                            <p class="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">${t.role} • ${t.game}</p>
+                        </div>
+                        <div class="text-amber-400 text-xs">${'⭐'.repeat(t.rating)}</div>
+                    </div>
+                    <p class="text-xs text-slate-600 dark:text-slate-300 italic">"${t.message}"</p>
+                </div>
+            `).join('');
+        }
+
+        function submitTestimonial(e) {
+            e.preventDefault();
+            const name = document.getElementById('testi-name').value;
+            const role = document.getElementById('testi-role').value;
+            const game = document.getElementById('testi-game').value;
+            const rating = parseInt(document.getElementById('testi-rating').value);
+            const message = document.getElementById('testi-msg').value;
+
+            const newT = {
+                id: Date.now(),
+                name, role, game, rating, message,
+                status: 'pending'
+            };
+
+            testimonialsDB.unshift(newT);
+            saveToLocalStorage();
+            renderTestimonials();
+            renderAdminTables();
+            showToast("Testimoni Anda berhasil dikirim dan menunggu moderasi admin!", "success");
+            e.target.reset();
+        }
+
+        function saveToLocalStorage() {
+            localStorage.setItem('pgb_categories_db', JSON.stringify(categories));
+            localStorage.setItem('pgb_games_db', JSON.stringify(gamesDB));
+            localStorage.setItem('pgb_testimonials_db', JSON.stringify(testimonialsDB));
+            localStorage.setItem('pgb_licenses_db', JSON.stringify(licensesDB));
+            localStorage.setItem('pgb_certificates_db', JSON.stringify(certificatesDB));
+        }
+
+        function updateDynamicStats() {
+            const totalGamesEl = document.getElementById('stat-total-games');
+            const totalPlayersEl = document.getElementById('stat-total-players');
+            const totalCategoriesEl = document.getElementById('stat-total-categories');
+
+            if (totalGamesEl) totalGamesEl.innerText = gamesDB.length;
+            if (totalPlayersEl) {
+                const sumPlayers = gamesDB.reduce((acc, curr) => acc + (curr.players || 0), 0);
+                totalPlayersEl.innerText = sumPlayers;
+            }
+            if (totalCategoriesEl) totalCategoriesEl.innerText = categories.length;
+        }
+
+        function launchGameById(id) {
+            const game = gamesDB.find(g => g.id === id);
+            if (!game) return;
+
+            const modal = document.getElementById('game-player-modal');
+            const container = document.getElementById('game-player-container');
+            const title = document.getElementById('player-game-title');
+            const subtitle = document.getElementById('player-game-subtitle');
+
+            if (!modal || !container) return;
+
+            title.innerText = game.title;
+            subtitle.innerText = `${game.category} • Kesulitan: ${game.difficulty}`;
+
+            if (game.type === 'quiz') {
+                container.innerHTML = `
+                    <div class="bg-white dark:bg-slate-800 p-8 rounded-3xl max-w-xl w-full text-center space-y-6 shadow-2xl">
+                        <div class="w-16 h-16 rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center text-2xl mx-auto">
+                            <i class="fa-solid fa-lightbulb"></i>
+                        </div>
+                        <h4 class="font-heading font-bold text-xl text-slate-900 dark:text-white">Pertanyaan Kuis Dharma</h4>
+                        <p class="text-sm text-slate-600 dark:text-slate-300">Siapakah Pangeran yang mencapai Penerangan Sempurna dan menjadi Buddha Gotama?</p>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <button onclick="answerQuiz(true)" class="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-700 hover:bg-amber-600 hover:text-white font-semibold text-xs transition">A. Pangeran Siddhartha</button>
+                            <button onclick="answerQuiz(false)" class="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-700 hover:bg-amber-600 hover:text-white font-semibold text-xs transition">B. Raja Asoka</button>
+                            <button onclick="answerQuiz(false)" class="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-700 hover:bg-amber-600 hover:text-white font-semibold text-xs transition">C. Yang Mulia Ananda</button>
+                            <button onclick="answerQuiz(false)" class="p-3.5 rounded-2xl bg-slate-100 dark:bg-slate-700 hover:bg-amber-600 hover:text-white font-semibold text-xs transition">D. Rahula</button>
+                        </div>
+                    </div>
+                `;
+            } else if (game.type === 'memory') {
+                container.innerHTML = `
+                    <div class="bg-white dark:bg-slate-800 p-6 rounded-3xl max-w-md w-full text-center space-y-4 shadow-2xl">
+                        <h4 class="font-heading font-bold text-lg text-slate-900 dark:text-white">Memory Card Match</h4>
+                        <p class="text-xs text-slate-500">Pasangkan ikon simbol suci Buddhis</p>
+                        <div class="grid grid-cols-4 gap-3">
+                            <button onclick="this.innerText='🪷'" class="h-16 rounded-2xl bg-slate-100 dark:bg-slate-700 text-2xl font-bold">❓</button>
+                            <button onclick="this.innerText='☸️'" class="h-16 rounded-2xl bg-slate-100 dark:bg-slate-700 text-2xl font-bold">❓</button>
+                            <button onclick="this.innerText='🪷'" class="h-16 rounded-2xl bg-slate-100 dark:bg-slate-700 text-2xl font-bold">❓</button>
+                            <button onclick="this.innerText='☸️'" class="h-16 rounded-2xl bg-slate-100 dark:bg-slate-700 text-2xl font-bold">❓</button>
+                        </div>
+                    </div>
+                `;
+            } else if (game.type === 'html5' && game.html5Code) {
+                container.innerHTML = `<iframe id="standalone-html5-game-frame" class="w-full h-full min-h-[600px] bg-white rounded-2xl border-0 shadow-inner"></iframe>`;
+                setTimeout(() => {
+                    const iframe = document.getElementById('standalone-html5-game-frame');
+                    if (iframe) iframe.srcdoc = game.html5Code;
+                }, 50);
+            } else if (game.type === 'iframe' && game.url) {
+                container.innerHTML = `<iframe src="${game.url}" class="w-full h-full min-h-[500px] rounded-2xl border-0"></iframe>`;
+            } else {
+                container.innerHTML = `<div class="text-white text-center">Permainan siap dimainkan!</div>`;
+            }
+
+            modal.classList.remove('hidden');
+            document.body.style.overflow = 'hidden';
+            showToast(`Game "${game.title}" siap dimainkan!`, "success");
+        }
+
+        function answerQuiz(isCorrect) {
+            if (isCorrect) {
+                showToast("Jawaban Benar! Anda memperoleh +50 XP Kebijaksanaan 🪷", "success");
+                if (currentUser) {
+                    currentUser.xp += 50;
+                    localStorage.setItem('pgb_current_user', JSON.stringify(currentUser));
+                    renderUserAuthHeader();
+                }
+            } else {
+                showToast("Jawaban belum tepat. Mari coba lagi!", "warning");
+            }
+        }
+
+        function closeGameModal() {
+            const modal = document.getElementById('game-player-modal');
+            if (modal) modal.classList.add('hidden');
+            document.body.style.overflow = 'auto';
+            if (document.fullscreenElement) {
+                document.exitFullscreen().catch(() => {});
+            }
+        }
+
+        function toggleNativeFullscreen() {
+            const container = document.getElementById('game-player-modal');
+            if (!document.fullscreenElement) {
+                container.requestFullscreen().catch(() => {
+                    showToast("Gagal mengaktifkan mode Layar Penuh", "warning");
+                });
+            } else {
+                document.exitFullscreen();
+            }
+        }
+
+        function openAddGameModal() {
+            populateCategorySelects();
+            document.getElementById('add-game-modal').classList.remove('hidden');
+        }
+
+        function toggleGameInputFields() {
+            const type = document.getElementById('new-game-type').value;
+            const urlField = document.getElementById('field-game-url');
+            const html5Field = document.getElementById('field-game-html5');
+
+            urlField.classList.toggle('hidden', type !== 'iframe');
+            html5Field.classList.toggle('hidden', type !== 'html5');
+        }
+
+        function closeAddGameModal() {
+            document.getElementById('add-game-modal').classList.add('hidden');
+        }
+
+        let currentUser = JSON.parse(localStorage.getItem('pgb_current_user')) || null;
+        let isAdminAuthenticated = false;
+        let authMode = 'login';
+
+        function openAuthModal(mode = 'login') {
+            authMode = mode;
+            const modal = document.getElementById('auth-modal');
+            const title = document.getElementById('auth-modal-title');
+            const nameField = document.getElementById('auth-name-field');
+            const submitBtn = document.getElementById('auth-submit-btn');
+            const toggleText = document.getElementById('auth-toggle-text');
+            const toggleBtn = document.getElementById('auth-toggle-btn');
+
+            if (authMode === 'login') {
+                title.innerText = 'Masuk ke Akun Buddhis';
+                nameField.classList.add('hidden');
+                submitBtn.innerText = 'Masuk Sekarang';
+                toggleText.innerText = 'Belum punya akun?';
+                toggleBtn.innerText = 'Daftar Akun Baru';
+            } else {
+                title.innerText = 'Daftar Akun Pengguna Baru';
+                nameField.classList.remove('hidden');
+                submitBtn.innerText = 'Daftar Sekarang';
+                toggleText.innerText = 'Sudah punya akun?';
+                toggleBtn.innerText = 'Masuk';
+            }
+            modal.classList.remove('hidden');
+        }
+
+        function closeAuthModal() {
+            document.getElementById('auth-modal').classList.add('hidden');
+        }
+
+        function toggleAuthMode() {
+            openAuthModal(authMode === 'login' ? 'register' : 'login');
+        }
+
+        function handleGoogleSignIn() {
+            const googleUser = {
+                id: 'google_' + Date.now(),
+                name: 'Sahabat Dharma (Google User)',
+                email: 'user.buddhis@gmail.com',
+                avatar: 'https://placehold.co/80x80/d97706/ffffff?text=GD',
+                xp: 250,
+                badge: 'Penjelajah Dharma'
+            };
+            currentUser = googleUser;
+            localStorage.setItem('pgb_current_user', JSON.stringify(currentUser));
+            renderUserAuthHeader();
+            closeAuthModal();
+            showToast("Berhasil masuk menggunakan Akun Google! Riwayat permainan tersimpan.", "success");
+        }
+
+        function handleEmailAuth(e) {
+            e.preventDefault();
+            const email = document.getElementById('auth-email-input').value;
+            const name = authMode === 'register' ? document.getElementById('auth-name-input').value : email.split('@')[0];
+
+            currentUser = {
+                id: 'user_' + Date.now(),
+                name: name || 'Pengguna Dharma',
+                email: email,
+                avatar: `https://placehold.co/80x80/ea580c/ffffff?text=${(name || 'U').substring(0,2).toUpperCase()}`,
+                xp: 100,
+                badge: 'Sahabat Kebijaksanaan'
+            };
+            localStorage.setItem('pgb_current_user', JSON.stringify(currentUser));
+            renderUserAuthHeader();
+            closeAuthModal();
+            showToast(`Selamat datang, ${currentUser.name}! Riwayat tersimpan.`, "success");
+        }
+
+        function logoutUser() {
+            currentUser = null;
+            localStorage.removeItem('pgb_current_user');
+            renderUserAuthHeader();
+            showToast("Anda telah keluar dari akun.", "info");
+        }
+
+        function renderUserAuthHeader() {
+            const container = document.getElementById('user-auth-container');
+            if (!container) return;
+
+            if (currentUser) {
+                container.innerHTML = `
+                    <div class="flex items-center gap-2 bg-slate-100 dark:bg-slate-800 p-1.5 pr-3 rounded-2xl border border-slate-200 dark:border-slate-700">
+                        <img src="${currentUser.avatar}" alt="Avatar" class="w-8 h-8 rounded-xl object-cover">
+                        <div class="text-left hidden sm:block">
+                            <h4 class="font-bold text-xs leading-tight text-slate-800 dark:text-slate-100">${currentUser.name}</h4>
+                            <p class="text-[10px] text-amber-600 dark:text-amber-400 font-semibold">${currentUser.badge} (${currentUser.xp} XP)</p>
+                        </div>
+                        <button onclick="logoutUser()" class="ml-1 text-slate-400 hover:text-rose-500 text-xs" title="Keluar Akun">
+                            <i class="fa-solid fa-right-from-bracket"></i>
+                        </button>
+                    </div>
+                `;
+            } else {
+                container.innerHTML = `
+                    <button onclick="openAuthModal('login')" class="hidden sm:inline-flex bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 text-white text-xs font-semibold px-4 py-2.5 rounded-xl shadow-md shadow-amber-600/20 transition">
+                        <i class="fa-solid fa-right-to-bracket mr-1.5"></i> Masuk / Daftar
+                    </button>
+                `;
+            }
+        }
+
+        function accessAdminHub() {
+            if (isAdminAuthenticated) {
+                switchView('admin');
+            } else {
+                document.getElementById('admin-pass-modal').classList.remove('hidden');
+            }
+        }
+
+        function closeAdminPassModal() {
+            document.getElementById('admin-pass-modal').classList.add('hidden');
+        }
+
+        function verifyAdminPassword(e) {
+            e.preventDefault();
+            const pass = document.getElementById('admin-password-input').value;
+            if (pass === 'admin321') {
+                isAdminAuthenticated = true;
+                closeAdminPassModal();
+                switchView('admin');
+                showToast("Akses Administrator Berhasil Diberikan!", "success");
+            } else {
+                showToast("Kata Sandi Admin Salah! Akses ditolak.", "warning");
+            }
+        }
+
+        // Render Admin Tables
+        function renderAdminTables() {
+            const gamesTable = document.getElementById('admin-games-table-body');
+            if (gamesTable) {
+                gamesTable.innerHTML = gamesDB.map(g => `
+                    <tr class="border-b border-slate-100 dark:border-slate-700/60 text-xs">
+                        <td class="py-3 px-4 font-bold text-slate-800 dark:text-slate-200">${g.title}</td>
+                        <td class="py-3 px-4 text-slate-600 dark:text-slate-400">${g.category}</td>
+                        <td class="py-3 px-4 font-mono text-slate-500">${g.type}</td>
+                        <td class="py-3 px-4 font-semibold text-amber-600 dark:text-amber-400">${g.players || 0} Pemain</td>
+                        <td class="py-3 px-4">
+                            <button onclick="togglePremiumStatus(${g.id})" class="px-2 py-1 rounded-full text-[10px] font-bold ${g.isPremium ? 'bg-amber-500 text-white' : 'bg-slate-200 dark:bg-slate-700 text-slate-600 dark:text-slate-300'}">
+                                ${g.isPremium ? 'PRO' : 'GRATIS'}
+                            </button>
+                        </td>
+                        <td class="py-3 px-4 space-x-2">
+                            <button onclick="deleteGame(${g.id})" class="text-rose-500 hover:text-rose-700"><i class="fa-solid fa-trash"></i></button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+
+            const catTable = document.getElementById('admin-categories-table-body');
+            if (catTable) {
+                catTable.innerHTML = categories.map(cat => {
+                    const linkedCount = gamesDB.filter(g => g.category === cat.name).length;
+                    return `
+                        <tr class="border-b border-slate-100 dark:border-slate-700/60 text-xs">
+                            <td class="py-3 px-4 text-amber-600">${renderCategoryIconElement(cat.icon)}</td>
+                            <td class="py-3 px-4 font-bold text-slate-800 dark:text-slate-200">${cat.name}</td>
+                            <td class="py-3 px-4 text-slate-600 dark:text-slate-400">${linkedCount} Game Terkait</td>
+                            <td class="py-3 px-4 space-x-3">
+                                <button onclick="editCategory('${cat.name.replace(/'/g, "\\'")}')" class="text-amber-600 hover:text-amber-800 font-semibold"><i class="fa-solid fa-pen-to-square mr-1"></i> Edit</button>
+                                <button onclick="deleteCategory('${cat.name.replace(/'/g, "\\'")}')" class="text-rose-500 hover:text-rose-700 font-semibold"><i class="fa-solid fa-trash mr-1"></i> Hapus</button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+            }
+
+            const testiTable = document.getElementById('admin-testi-table-body');
+            if (testiTable) {
+                testiTable.innerHTML = testimonialsDB.map(t => `
+                    <tr class="border-b border-slate-100 dark:border-slate-700/60 text-xs">
+                        <td class="py-3 px-4 font-bold text-slate-800 dark:text-slate-200">${t.name} <span class="text-slate-400">(${t.role})</span></td>
+                        <td class="py-3 px-4 text-slate-600 dark:text-slate-400 max-w-xs truncate">${t.message}</td>
+                        <td class="py-3 px-4">
+                            <span class="px-2 py-0.5 rounded-full text-[10px] font-bold ${t.status === 'approved' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}">
+                                ${t.status === 'approved' ? 'Disetujui' : 'Menunggu'}
+                            </span>
+                        </td>
+                        <td class="py-3 px-4 space-x-2">
+                            ${t.status !== 'approved' ? `<button onclick="approveTestimonial(${t.id})" class="text-emerald-600 hover:text-emerald-800 font-bold"><i class="fa-solid fa-check"></i> Setujui</button>` : ''}
+                            <button onclick="deleteTestimonial(${t.id})" class="text-rose-500 hover:text-rose-700"><i class="fa-solid fa-trash"></i></button>
+                        </td>
+                    </tr>
+                `).join('');
+            }
+
+            const licTable = document.getElementById('admin-licenses-table-body');
+            if (licTable) {
+                licTable.innerHTML = licensesDB.map(l => `
+                    <tr class="border-b border-slate-100 dark:border-slate-700/60 text-xs">
+                        <td class="py-3 px-4 font-bold text-slate-800 dark:text-slate-200">${l.name}</td>
+                        <td class="py-3 px-4 text-amber-600 dark:text-amber-400 font-semibold">${l.plan}</td>
+                        <td class="py-3 px-4"><span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700">${l.status}</span></td>
+                        <td class="py-3 px-4 text-slate-500 font-mono">${l.expires}</td>
+                    </tr>
+                `).join('');
+            }
+
+            const certTable = document.getElementById('admin-certificates-table-body');
+            if (certTable) {
+                certTable.innerHTML = certificatesDB.map(c => `
+                    <tr class="border-b border-slate-100 dark:border-slate-700/60 text-xs">
+                        <td class="py-3 px-4 font-mono font-bold text-amber-600">${c.id}</td>
+                        <td class="py-3 px-4 font-bold text-slate-800 dark:text-slate-200">${c.student}</td>
+                        <td class="py-3 px-4 text-slate-600 dark:text-slate-300">${c.module}</td>
+                        <td class="py-3 px-4 text-slate-500">${c.date}</td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        let uploadedNewCategoryIconBase64 = "";
+        function handleNewCategoryFile(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                uploadedNewCategoryIconBase64 = e.target.result;
+                showToast(`File ikon (${file.name}) berhasil dimuat!`, "success");
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function editCategory(oldName) {
+            const catObj = categories.find(c => c.name === oldName);
+            const newName = prompt(`Ubah nama kategori:`, oldName);
+            if (!newName) return;
+            const trimmedName = newName.trim();
+            if (!trimmedName) {
+                showToast("Nama kategori tidak boleh kosong!", "warning");
+                return;
+            }
+
+            const newIcon = prompt(`Ubah ikon (Masukkan kode FontAwesome misal 'fa-om' ATAU biarkan kosong jika ingin pakai ikon sebelumnya):`, catObj ? catObj.icon : 'fa-seedling');
+
+            if (catObj) {
+                catObj.name = trimmedName;
+                if (newIcon && newIcon.trim() !== '') {
+                    catObj.icon = newIcon.trim();
+                }
+            }
+
+            gamesDB.forEach(g => {
+                if (g.category === oldName) {
+                    g.category = trimmedName;
+                }
+            });
+
+            saveToLocalStorage();
+            populateCategorySelects();
+            renderHomeCategories();
+            renderCatalogGames();
+            renderFeaturedGames();
+            renderAdminTables();
+            updateDynamicStats();
+            showToast(`Kategori berhasil diperbarui!`, "success");
+        }
+
+        function addNewCategory() {
+            const input = document.getElementById('new-category-input');
+            const iconInput = document.getElementById('new-category-icon-input');
+            if (!input) return;
+            const catName = input.value.trim();
+            const faIcon = iconInput.value.trim();
+
+            if (!catName) {
+                showToast("Nama kategori tidak boleh kosong!", "warning");
+                return;
+            }
+            if (categories.some(c => c.name === catName)) {
+                showToast("Kategori tersebut sudah ada!", "warning");
+                return;
+            }
+
+            const finalIcon = uploadedNewCategoryIconBase64 || faIcon || 'fa-seedling';
+
+            categories.push({ name: catName, icon: finalIcon });
+            uploadedNewCategoryIconBase64 = "";
+            saveToLocalStorage();
+            populateCategorySelects();
+            renderHomeCategories();
+            renderCatalogGames();
+            renderAdminTables();
+            updateDynamicStats();
+            input.value = '';
+            iconInput.value = '';
+            const fileInput = document.getElementById('new-category-file-input');
+            if (fileInput) fileInput.value = '';
+            showToast(`Kategori "${catName}" berhasil ditambahkan!`, "success");
+        }
+
+        function deleteCategory(catName) {
+            const linked = gamesDB.filter(g => g.category === catName).length;
+            if (linked > 0) {
+                showToast(`Kategori "${catName}" masih digunakan oleh ${linked} game!`, "warning");
+                return;
+            }
+            categories = categories.filter(c => c.name !== catName);
+            saveToLocalStorage();
+            populateCategorySelects();
+            renderHomeCategories();
+            renderCatalogGames();
+            renderAdminTables();
+            updateDynamicStats();
+            showToast(`Kategori "${catName}" berhasil dihapus.`, "success");
+        }
+
+        function resetTotalPlayerStats() {
+            gamesDB.forEach(g => { g.players = 0; });
+            renderCatalogGames();
+            renderFeaturedGames();
+            renderAdminTables();
+            updateDynamicStats();
+            showToast("Statistik total pemain berhasil direset. Klik 'Simpan Data (Save)' untuk menyimpan permanen.", "warning");
+        }
+
+        function saveGameData() {
+            saveToLocalStorage();
+            showToast("Semua perubahan data permainan dan statistik berhasil disimpan permanen!", "success");
+        }
+
+        function handlePortableGameFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const fileName = file.name;
+            const ext = fileName.split('.').pop().toLowerCase();
+            const reader = new FileReader();
+
+            reader.onload = function(e) {
+                const content = e.target.result;
+
+                if (ext === 'json') {
+                    try {
+                        const json = JSON.parse(content);
+                        if (json.title) document.getElementById('new-game-title').value = json.title;
+                        if (json.desc) document.getElementById('new-game-desc').value = json.desc;
+                        if (json.category && categories.some(c => c.name === json.category)) {
+                            document.getElementById('new-game-category').value = json.category;
+                        }
+                        if (json.type) {
+                            document.getElementById('new-game-type').value = json.type;
+                            toggleGameInputFields();
+                        }
+                        if (json.html5Code) document.getElementById('new-game-html5').value = json.html5Code;
+                        if (json.url) document.getElementById('new-game-url').value = json.url;
+                        if (json.thumbnail) document.getElementById('new-game-thumb-url').value = json.thumbnail;
+                        showToast(`Paket game JSON "${json.title || fileName}" berhasil dibaca!`, "success");
+                    } catch (err) {
+                        showToast("File JSON tidak valid!", "warning");
+                    }
+                } else if (ext === 'html' || ext === 'html5' || ext === 'js') {
+                    document.getElementById('new-game-type').value = 'html5';
+                    toggleGameInputFields();
+                    document.getElementById('new-game-html5').value = content;
+                    
+                    const cleanName = fileName.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ");
+                    const titleField = document.getElementById('new-game-title');
+                    if (!titleField.value) {
+                        titleField.value = cleanName.charAt(0).toUpperCase() + cleanName.slice(1);
+                    }
+                    showToast(`File game portable "${fileName}" berhasil dimuat ke editor script HTML5!`, "success");
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        function switchAdminTab(tabId) {
+            document.querySelectorAll('.admin-tab-content').forEach(el => el.classList.add('hidden'));
+            const target = document.getElementById(`admin-tab-${tabId}`);
+            if (target) target.classList.remove('hidden');
+        }
+
+        function togglePremiumStatus(id) {
+            const game = gamesDB.find(g => g.id === id);
+            if (game) {
+                game.isPremium = !game.isPremium;
+                saveToLocalStorage();
+                renderCatalogGames();
+                renderFeaturedGames();
+                renderAdminTables();
+                showToast(`Status game "${game.title}" diperbarui.`, "info");
+            }
+        }
+
+        function deleteGame(id) {
+            gamesDB = gamesDB.filter(g => g.id !== id);
+            saveToLocalStorage();
+            renderCatalogGames();
+            renderFeaturedGames();
+            renderAdminTables();
+            updateDynamicStats();
+            showToast("Game berhasil dihapus.", "warning");
+        }
+
+        function approveTestimonial(id) {
+            const t = testimonialsDB.find(x => x.id === id);
+            if (t) {
+                t.status = 'approved';
+                saveToLocalStorage();
+                renderTestimonials();
+                renderAdminTables();
+                showToast("Testimoni berhasil disetujui!", "success");
+            }
+        }
+
+        function deleteTestimonial(id) {
+            testimonialsDB = testimonialsDB.filter(t => t.id !== id);
+            saveToLocalStorage();
+            renderTestimonials();
+            renderAdminTables();
+            showToast("Testimoni dihapus.", "warning");
+        }
+
+        let uploadedThumbnailBase64 = "";
+        function handleThumbnailFileUpload(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                uploadedThumbnailBase64 = e.target.result;
+                document.getElementById('new-game-thumb-url').value = "";
+                
+                const previewBox = document.getElementById('thumb-preview-box');
+                const previewImg = document.getElementById('thumb-preview-img');
+                if (previewBox && previewImg) {
+                    previewImg.src = uploadedThumbnailBase64;
+                    previewBox.classList.remove('hidden');
+                }
+                showToast("Gambar thumbnail berhasil diunggah!", "success");
+            };
+            reader.readAsDataURL(file);
+        }
+
+        function saveNewGame(e) {
+            e.preventDefault();
+            const title = document.getElementById('new-game-title').value.trim();
+            const category = document.getElementById('new-game-category').value;
+            const difficulty = document.getElementById('new-game-difficulty').value;
+            const type = document.getElementById('new-game-type').value;
+            const desc = document.getElementById('new-game-desc').value.trim();
+            const isPremium = document.getElementById('new-game-premium').checked;
+            const url = document.getElementById('new-game-url').value.trim();
+            const html5Code = document.getElementById('new-game-html5').value.trim();
+            const thumbUrlInput = document.getElementById('new-game-thumb-url').value.trim();
+
+            const finalThumbnail = uploadedThumbnailBase64 || thumbUrlInput || "";
+
+            if (!title || !desc) {
+                showToast("Harap lengkapi nama dan deskripsi game!", "warning");
+                return;
+            }
+
+            const newGame = {
+                id: Date.now(),
+                title, category, difficulty, type, desc,
+                rating: 5.0,
+                players: 1,
+                featured: true,
+                isPremium,
+                thumbnail: finalThumbnail,
+                url: type === 'iframe' ? url : undefined,
+                html5Code: type === 'html5' ? html5Code : undefined
+            };
+
+            gamesDB.unshift(newGame);
+            uploadedThumbnailBase64 = "";
+            saveToLocalStorage();
+            renderCatalogGames();
+            renderFeaturedGames();
+            renderAdminTables();
+            updateDynamicStats();
+            closeAddGameModal();
+            e.target.reset();
+            showToast(`Game "${title}" beserta thumbnail berhasil ditambahkan!`, "success");
+        }
+
+        window.onload = function() {
+            renderHeroSection();
+            renderUserAuthHeader();
+            populateCategorySelects();
+            renderHomeCategories();
+            renderFeaturedGames();
+            renderCatalogGames();
+            renderTestimonials();
+            renderAdminTables();
+            updateDynamicStats();
+        };
+    </script>
+</body>
+</html>

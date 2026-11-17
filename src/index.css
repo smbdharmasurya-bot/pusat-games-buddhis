@@ -1,0 +1,24 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Plus Jakarta Sans", system-ui, -apple-system, sans-serif;
+  --font-heading: "Cinzel", Georgia, serif;
+  --font-mono: "JetBrains Mono", monospace;
+  --color-deepNavy: #0F172A;
+  --color-royalBlue: #1E40AF;
+  --color-antiqueGold: #D97706;
+  --color-saffronOrange: #EA580C;
+  --color-bodhiGreen: #16A34A;
+}
+
+@layer utilities {
+  .bodhi-pattern {
+    background-image: radial-gradient(rgba(217, 119, 6, 0.12) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+  .dark .bodhi-pattern {
+    background-image: radial-gradient(rgba(245, 158, 11, 0.08) 1px, transparent 1px);
+    background-size: 24px 24px;
+  }
+}

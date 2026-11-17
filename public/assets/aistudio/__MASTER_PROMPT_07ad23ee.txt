@@ -1,0 +1,1457 @@
+# MASTER PROMPT
+# REFAKTORISASI DAN PENGEMBANGAN FULL-STACK
+# PUSAT GAMES BUDDHIS
+## Dari Single-Frontend HTML5 menjadi Aplikasi Full-Stack Berbasis SQL Database dan Siap Hosting Online
+
+---
+
+# 1. PERAN DAN KEAHLIAN
+
+Bertindaklah sebagai tim pengembang perangkat lunak profesional yang terdiri atas:
+
+1. **Senior Full-Stack Developer** – ahli HTML5, Tailwind CSS, JavaScript murni, Node.js, Express, REST API, dan integrasi database.
+2. **System Architect** – merancang arsitektur aplikasi yang modular, scalable, aman, dan mudah dikembangkan.
+3. **Database Engineer** – merancang database relasional, normalisasi data, relasi, indeks, transaksi, dan migrasi database.
+4. **Backend Developer** – membangun API, autentikasi, otorisasi, upload file, validasi, dan sinkronisasi data.
+5. **Frontend Developer** – mempertahankan antarmuka dan seluruh interaksi aplikasi yang sudah tersedia.
+6. **Cybersecurity Engineer** – menerapkan perlindungan autentikasi, keamanan upload, validasi input, keamanan iframe, dan proteksi API.
+7. **DevOps Engineer** – menyiapkan deployment, konfigurasi domain/subdomain, HTTPS, reverse proxy, backup, dan monitoring.
+8. **QA Engineer** – melakukan pengujian fungsional, integrasi, keamanan, dan kompatibilitas aplikasi.
+
+Hasil pengembangan harus memiliki standar aplikasi produksi (production-ready), bukan hanya demonstrasi atau contoh kode.
+
+# 2. IDENTITAS DAN KONTEKS PROYEK
+
+Nama aplikasi: **PUSAT GAMES BUDDHIS**
+
+Jenis aplikasi: Platform permainan edukasi Buddhis berbasis web.
+
+Teknologi frontend yang sudah digunakan:
+
+- HTML5.
+- Tailwind CSS.
+- JavaScript murni (Vanilla JavaScript).
+- HTML5 Game.
+- iframe dengan srcdoc.
+- localStorage sebagai penyimpanan data versi lama.
+
+Kondisi aplikasi saat ini:
+
+Aplikasi masih menggunakan penyimpanan lokal browser. Akibatnya, perubahan data yang dilakukan oleh administrator pada Komputer A tidak otomatis tersedia pada Komputer B.
+
+Target pengembangan:
+
+Mengubah aplikasi menjadi sistem Full-Stack dengan database SQL pusat sehingga seluruh data utama tersimpan secara terpusat dan dapat diakses oleh administrator maupun pengguna dari perangkat berbeda.
+
+Contoh alamat produksi:
+
+- Aplikasi: `https://games.namasekolah.com`
+- API: `https://games.namasekolah.com/api/v1`
+- Area permainan atau konten game: dapat menggunakan subdomain terisolasi apabila diperlukan.
+- Database: PostgreSQL pada server pusat.
+
+**Prinsip utama:**
+
+Database SQL merupakan satu-satunya sumber data utama (Single Source of Truth). Browser tidak boleh lagi menjadi tempat penyimpanan permanen untuk data inti aplikasi.
+
+# 3. ATURAN UTAMA: AUDIT DAN PERTAHANKAN APLIKASI LAMA
+
+Sebelum membuat kode baru, lakukan pemeriksaan menyeluruh terhadap source code aplikasi yang tersedia.
+
+Jangan langsung membangun ulang aplikasi dari nol.
+
+Lakukan tahapan berikut:
+
+1. Inventarisasi seluruh file HTML, CSS, JavaScript, aset, dan komponen aplikasi.
+2. Identifikasi seluruh fitur yang sudah tersedia.
+3. Identifikasi seluruh fungsi yang menggunakan localStorage dan sessionStorage.
+4. Identifikasi struktur data yang saat ini disimpan secara lokal.
+5. Identifikasi seluruh fungsi Admin Hub Studio dan hak aksesnya.
+6. Identifikasi alur tambah, edit, hapus, pencarian, penyaringan, dan penampilan game.
+7. Identifikasi konfigurasi permainan portable.
+8. Identifikasi sistem poin XP, badge, sertifikat, lisensi, dan autentikasi.
+9. Identifikasi komponen Hero, Stupa, Candi, dan kustomisasi halaman beranda.
+10. Buat pemetaan fitur lama terhadap arsitektur baru.
+
+Buat tabel audit dengan kolom:
+
+| Fitur Lama | Lokasi/Fungsi | Penyimpanan Lama | Endpoint API Baru | Status Migrasi |
+|---|---|---|---|---|
+
+Ketentuan mutlak:
+
+- Jangan menghapus fitur yang sudah tersedia.
+- Jangan mengubah desain visual tanpa alasan teknis yang jelas.
+- Pertahankan identitas visual Pusat Games Buddhis.
+- Pertahankan seluruh halaman, menu, modal, tab, tombol, dan interaksi yang masih berfungsi.
+- Jangan mengganti aplikasi menjadi framework frontend baru.
+- Tetap gunakan HTML5, Tailwind CSS, dan Vanilla JavaScript.
+- Jangan membuat ulang fitur yang sebenarnya sudah berjalan dengan baik.
+- Jika source code belum tersedia, buat implementasi referensi yang lengkap dan tandai bagian yang membutuhkan penyesuaian terhadap source code asli.
+- Jangan mengklaim telah mengintegrasikan atau menguji file yang belum diberikan.
+
+Hasil audit harus menjadi dasar pengembangan seluruh sistem.
+
+# 4. ARSITEKTUR TEKNOLOGI
+
+Gunakan arsitektur berikut sebagai standar implementasi.
+
+## 4.1. Frontend
+
+- HTML5.
+- Tailwind CSS.
+- Vanilla JavaScript ES6+.
+- Fetch API sebagai komunikasi utama dengan backend.
+- Socket.IO Client untuk notifikasi sinkronisasi data.
+- iframe srcdoc untuk permainan HTML5 portable.
+- Font Awesome untuk ikon yang sudah digunakan.
+- Chart.js atau library sejenis jika aplikasi membutuhkan grafik statistik.
+
+Jangan memperkenalkan React, Vue, Angular, atau framework SPA lainnya kecuali benar-benar diperlukan dan mendapat persetujuan.
+
+## 4.2. Backend
+
+Gunakan:
+
+- Node.js LTS yang didukung pada saat implementasi.
+- Express.js.
+- REST API.
+- Socket.IO.
+- Prisma ORM.
+- Zod untuk validasi data.
+- Multer untuk upload file.
+- Argon2id atau bcrypt untuk hashing password.
+- Helmet untuk security headers.
+- Express Rate Limit untuk pembatasan request.
+- Logging terstruktur.
+- PostgreSQL sebagai database utama.
+
+Jika lingkungan hosting hanya mendukung MySQL, sediakan alternatif skema dan konfigurasi MySQL tanpa mengubah kontrak API frontend.
+
+## 4.3. Database
+
+Gunakan PostgreSQL dengan struktur relasional.
+
+Pastikan terdapat:
+
+- Primary key.
+- Foreign key.
+- Unique constraint.
+- Index.
+- Relasi antarentitas.
+- Timestamp `created_at` dan `updated_at`.
+- Validasi data.
+- Transaksi database.
+- Kebijakan penghapusan data.
+- Mekanisme migrasi database.
+
+## 4.4. Arsitektur Komunikasi
+
+Gunakan pola:
+
+`Frontend → REST API → Backend Service → Prisma ORM → SQL Database`
+
+Untuk sinkronisasi:
+
+`Admin A → API → Database → Socket.IO → Admin B`
+
+`Admin B → API → Database → Admin A`
+
+Socket.IO digunakan untuk memberi tahu klien bahwa suatu data berubah. Data yang sebenarnya tetap diambil dari API dan database, bukan hanya dikirim melalui event socket.
+
+Pastikan event sinkronisasi hanya dikirim setelah transaksi database berhasil diselesaikan.
+
+Sediakan mekanisme fallback berupa polling berkala jika koneksi WebSocket terputus.
+
+# 5. STRUKTUR DATABASE SQL
+
+Buat skema database lengkap berdasarkan tabel inti berikut.
+
+## 5.1. Tabel games
+
+| Field | Tipe Data | Keterangan |
+|---|---|---|
+| id | UUID / BIGINT | Primary key |
+| title | VARCHAR | Judul game |
+| slug | VARCHAR | Identitas URL unik |
+| category_id | FK | Relasi kategori |
+| difficulty | VARCHAR | Tingkat kesulitan |
+| type | VARCHAR | Jenis permainan |
+| rating | DECIMAL | Rating |
+| players | BIGINT | Jumlah pemain |
+| thumbnail | TEXT | Lokasi thumbnail |
+| description | TEXT | Deskripsi game |
+| is_premium | BOOLEAN | Status premium |
+| html5_code | TEXT | Konten HTML game jika disimpan dalam database |
+| url | TEXT | URL game eksternal |
+| status | VARCHAR | Draft/published/archived |
+| created_at | TIMESTAMP | Tanggal dibuat |
+| updated_at | TIMESTAMP | Tanggal diperbarui |
+
+Pertahankan kompatibilitas nama `desc` jika source code lama menggunakannya, tetapi gunakan nama `description` yang lebih aman dan konsisten pada database baru.
+
+## 5.2. Tabel categories
+
+| Field | Tipe Data | Keterangan |
+|---|---|---|
+| id | UUID / BIGINT | Primary key |
+| name | VARCHAR | Nama kategori |
+| slug | VARCHAR | Identitas unik |
+| icon | TEXT | FontAwesome atau lokasi file ikon |
+| sort_order | INTEGER | Urutan tampilan |
+| status | BOOLEAN | Status aktif |
+| created_at | TIMESTAMP | Tanggal dibuat |
+| updated_at | TIMESTAMP | Tanggal diperbarui |
+
+Dukung tiga jenis ikon:
+
+- String Font Awesome, misalnya `fa-solid fa-gamepad`.
+- File `.ico`.
+- File `.webp`.
+
+## 5.3. Tabel testimonials
+
+Field:
+
+- id.
+- name.
+- role.
+- game.
+- rating.
+- message.
+- status.
+- created_at.
+- updated_at.
+
+Status testimonial meliputi pending, approved, dan rejected.
+
+Hanya testimonial yang sudah disetujui yang boleh ditampilkan pada halaman publik.
+
+## 5.4. Tabel licenses
+
+Field:
+
+- id.
+- school_name.
+- plan.
+- status.
+- expires_date.
+- license_key.
+- created_at.
+- updated_at.
+
+Buat mekanisme pemeriksaan masa berlaku lisensi di sisi backend.
+
+## 5.5. Tabel certificates
+
+Field:
+
+- id.
+- student_name.
+- module.
+- institution.
+- date.
+- certificate_number.
+- verification_code.
+- user_id.
+- created_at.
+
+Tambahkan fitur validasi keaslian sertifikat.
+
+## 5.6. Tabel users
+
+Field:
+
+- id.
+- name.
+- email.
+- avatar.
+- xp.
+- badge.
+- created_at.
+- updated_at.
+
+Tabel ini digunakan untuk profil pengguna atau peserta didik.
+
+## 5.7. Tabel Tambahan Wajib
+
+Tambahkan tabel pendukung agar aplikasi lebih terstruktur.
+
+**admin_users**
+
+Menyimpan akun administrator secara terpisah dari pengguna/peserta didik.
+
+Field:
+
+- id.
+- name.
+- email.
+- password_hash.
+- role.
+- status.
+- last_login.
+- created_at.
+- updated_at.
+
+Role minimal:
+
+- super_admin.
+- admin.
+- editor.
+- moderator.
+
+**game_assets**
+
+Menyimpan metadata file pendukung game, seperti JavaScript, CSS, gambar, audio, dan aset lainnya.
+
+**game_sessions**
+
+Mencatat aktivitas permainan:
+
+- id.
+- user_id.
+- game_id.
+- started_at.
+- finished_at.
+- duration_seconds.
+- completion_status.
+- score.
+
+**xp_transactions**
+
+Mencatat riwayat perolehan dan perubahan XP:
+
+- id.
+- user_id.
+- game_id.
+- amount.
+- source.
+- description.
+- created_at.
+
+Setiap perubahan XP harus tercatat dan tidak hanya mengubah nilai total pada tabel users.
+
+**site_settings**
+
+Menyimpan konfigurasi beranda dan pengaturan tampilan.
+
+Minimal mendukung:
+
+- Hero title.
+- Hero subtitle.
+- Hero image.
+- Tombol CTA.
+- Stupa.
+- Candi.
+- Warna atau tema.
+- Konten halaman depan.
+- Konfigurasi tampilan lainnya.
+
+**audit_logs**
+
+Mencatat aktivitas penting administrator:
+
+- Admin yang melakukan tindakan.
+- Jenis tindakan.
+- Data yang diubah.
+- Waktu tindakan.
+- Informasi pendukung yang relevan.
+
+Tambahkan tabel lain apabila hasil audit menemukan kebutuhan yang belum tercakup.
+
+## 5.8. Relasi Database
+
+Definisikan seluruh relasi dengan jelas.
+
+Contohnya:
+
+- Satu kategori memiliki banyak game.
+- Satu game mempunyai banyak aset.
+- Satu pengguna mempunyai banyak sesi permainan.
+- Satu pengguna mempunyai banyak transaksi XP.
+- Satu pengguna dapat mempunyai banyak sertifikat.
+- Satu game mempunyai banyak sesi permainan.
+- Administrator mempunyai banyak catatan audit.
+
+Gunakan foreign key dan aturan penghapusan yang aman.
+
+Jangan menghapus data transaksi, sertifikat, dan riwayat permainan secara permanen hanya karena data induknya dihapus.
+
+# 6. SISTEM BACKEND REST API
+
+Buat API dengan prefix:
+
+`/api/v1`
+
+Gunakan response JSON yang konsisten.
+
+Format sukses:
+
+```json
+{
+  "success": true,
+  "message": "Data berhasil disimpan",
+  "data": {}
+}
+```
+
+Format error:
+
+```json
+{
+  "success": false,
+  "message": "Permintaan tidak dapat diproses",
+  "errors": []
+}
+```
+
+Gunakan HTTP status code yang sesuai.
+
+## 6.1. API Games
+
+Buat endpoint:
+
+| Method | Endpoint | Fungsi |
+|---|---|---|
+| GET | /api/v1/games | Daftar game |
+| GET | /api/v1/games/:id | Detail game |
+| POST | /api/v1/games | Tambah game |
+| PUT | /api/v1/games/:id | Edit game |
+| DELETE | /api/v1/games/:id | Hapus/arsipkan game |
+| POST | /api/v1/games/upload | Upload game portable |
+| GET | /api/v1/games/:id/play | Mendapatkan konten game |
+| POST | /api/v1/games/:id/play | Mencatat sesi permainan |
+
+Dukung:
+
+- Pagination.
+- Search.
+- Filter kategori.
+- Filter kesulitan.
+- Filter tipe.
+- Filter premium.
+- Sorting.
+- Status publikasi.
+- Pengelolaan thumbnail.
+- Pengelolaan konten game portable.
+
+## 6.2. API Categories
+
+| Method | Endpoint | Fungsi |
+|---|---|---|
+| GET | /api/v1/categories | Daftar kategori |
+| GET | /api/v1/categories/:id | Detail kategori |
+| POST | /api/v1/categories | Tambah kategori |
+| PUT | /api/v1/categories/:id | Edit kategori |
+| DELETE | /api/v1/categories/:id | Hapus kategori |
+| POST | /api/v1/categories/:id/icon | Upload ikon |
+
+Upload ikon wajib memvalidasi:
+
+- Ekstensi.
+- MIME type.
+- Magic bytes atau signature file.
+- Ukuran file.
+- Nama file.
+- Potensi file berbahaya.
+
+Jangan hanya mengandalkan pemeriksaan ekstensi dari browser.
+
+## 6.3. API Testimonials
+
+| Method | Endpoint | Fungsi |
+|---|---|---|
+| GET | /api/v1/testimonials | Daftar testimonial |
+| POST | /api/v1/testimonials | Tambah testimonial |
+| PUT | /api/v1/testimonials/:id | Edit testimonial |
+| PATCH | /api/v1/testimonials/:id/status | Moderasi |
+| DELETE | /api/v1/testimonials/:id | Hapus testimonial |
+
+## 6.4. API Statistik
+
+| Method | Endpoint | Fungsi |
+|---|---|---|
+| GET | /api/v1/stats/overview | Ringkasan statistik |
+| GET | /api/v1/stats/games | Statistik game |
+| GET | /api/v1/stats/players | Statistik pemain |
+| GET | /api/v1/stats/activity | Aktivitas pengguna |
+| GET | /api/v1/stats/xp | Statistik XP |
+
+Statistik minimal:
+
+- Total game.
+- Total kategori.
+- Total pemain.
+- Total sesi permainan.
+- Total permainan dimainkan.
+- Game terpopuler.
+- Game terbaru.
+- Rata-rata rating.
+- Total XP.
+- Jumlah pemain aktif.
+- Grafik aktivitas berdasarkan periode.
+
+Definisikan secara jelas apakah statistik pemain menghitung jumlah pengguna unik, jumlah sesi, atau total permainan. Jangan mencampurkan ketiganya.
+
+## 6.5. API Pengguna dan XP
+
+Buat endpoint untuk:
+
+- Registrasi atau pembuatan akun sesuai kebijakan aplikasi.
+- Login.
+- Logout.
+- Profil pengguna.
+- Riwayat permainan.
+- Perolehan XP.
+- Riwayat XP.
+- Badge.
+- Papan peringkat.
+
+Pastikan perolehan XP dihitung dan divalidasi di backend. Jangan mempercayai nilai XP yang dikirim langsung dari browser.
+
+Gunakan transaksi database agar pembaruan XP dan pencatatan xp_transactions selalu konsisten.
+
+## 6.6. API Lisensi dan Sertifikat
+
+Sediakan endpoint untuk:
+
+- Manajemen lisensi.
+- Pemeriksaan status lisensi.
+- Pemeriksaan masa berlaku.
+- Pembuatan sertifikat.
+- Daftar sertifikat pengguna.
+- Verifikasi sertifikat melalui kode verifikasi.
+
+## 6.7. API Kustomisasi Beranda
+
+Buat endpoint untuk:
+
+- Mengambil pengaturan beranda.
+- Mengubah Hero.
+- Mengubah teks dan gambar Hero.
+- Mengelola tampilan Stupa dan Candi.
+- Mengubah konfigurasi visual.
+- Menyimpan perubahan beranda.
+
+Hanya administrator dengan izin yang sesuai yang boleh mengubah konfigurasi.
+
+# 7. SISTEM UPLOAD DAN GAME PORTABLE
+
+Fitur ini merupakan bagian penting dari aplikasi dan tidak boleh dihilangkan.
+
+Admin harus dapat menambahkan game baru melalui Admin Hub Studio.
+
+Dukung format berikut:
+
+- `.html`
+- `.json`
+- `.js`
+- `.css`
+- `.zip` untuk paket permainan beserta aset pendukung, apabila diperlukan.
+
+Terapkan aturan format:
+
+1. File HTML tunggal dapat disimpan sebagai `html5_code` apabila ukuran masih berada dalam batas yang ditetapkan.
+2. File JSON harus divalidasi dan memiliki struktur manifest yang jelas.
+3. File JavaScript tidak boleh langsung dianggap sebagai game lengkap tanpa loader atau manifest yang valid.
+4. Game dengan banyak aset sebaiknya disimpan sebagai paket di storage server, sedangkan database menyimpan metadata dan lokasi filenya.
+5. File ZIP harus diperiksa dari path traversal, file berbahaya, dan ukuran hasil ekstraksi.
+6. Backend tidak boleh mengeksekusi file permainan yang diunggah.
+7. File game harus disajikan melalui mekanisme yang aman dan terpisah dari proses backend.
+
+Buat standar `manifest.json` untuk permainan portable yang membutuhkan banyak aset.
+
+Contoh:
+
+```json
+{
+  "title": "Nama Game",
+  "version": "1.0.0",
+  "entry": "index.html",
+  "assets": [
+    "index.html",
+    "style.css",
+    "game.js"
+  ]
+}
+```
+
+## 7.1. Sistem iframe srcdoc
+
+Pertahankan cara menjalankan game melalui:
+
+```javascript
+iframe.srcdoc = gameHtml;
+```
+
+Namun, jangan hanya berfokus pada keberhasilan menampilkan permainan. Terapkan isolasi dan keamanan konten.
+
+Ketentuan:
+
+- Game tetap dapat menjalankan JavaScript yang memang dibutuhkan.
+- Game responsif di berbagai ukuran layar.
+- Area game tidak boleh merusak navigasi halaman utama.
+- Gunakan atribut sandbox dengan izin minimum yang diperlukan.
+- Jangan memberikan izin akses yang tidak dibutuhkan.
+- Batasi akses top navigation, pop-up, dan navigasi keluar.
+- Gunakan Content Security Policy yang sesuai.
+- Jangan memberikan akses DOM halaman induk kepada game.
+- Hindari kombinasi izin iframe yang memungkinkan game mengambil alih halaman utama.
+- Pertimbangkan origin/subdomain khusus untuk konten game yang tidak dipercaya.
+
+Jika game membutuhkan aset eksternal, buat sistem resolusi URL aset yang konsisten dan aman.
+
+Jangan mengubah source code game sedemikian rupa sehingga permainan lama tidak lagi berfungsi.
+
+# 8. AUTENTIKASI DAN KEAMANAN ADMIN HUB STUDIO
+
+Pertahankan Admin Hub Studio sebagai pusat pengelolaan aplikasi.
+
+Namun, ubah proteksi password yang hanya berada di JavaScript menjadi autentikasi server-side.
+
+Persyaratan:
+
+1. Password tidak boleh disimpan dalam bentuk teks biasa.
+2. Gunakan Argon2id atau bcrypt untuk hashing password.
+3. Password administrator tidak boleh ditanam di HTML atau JavaScript.
+4. Hak akses harus diperiksa di backend.
+5. Implementasikan role-based access control (RBAC).
+6. Terapkan pembatasan percobaan login.
+7. Terapkan rate limiting.
+8. Sediakan mekanisme logout.
+9. Sediakan manajemen sesi.
+10. Catat aktivitas administrator melalui audit log.
+
+Utamakan session authentication menggunakan cookie:
+
+- HttpOnly.
+- Secure pada HTTPS.
+- SameSite sesuai kebutuhan.
+- Perlindungan CSRF.
+- Masa berlaku sesi yang jelas.
+
+Jangan menyimpan token autentikasi permanen di localStorage.
+
+Jika menggunakan JWT, jelaskan dan implementasikan dengan benar mekanisme refresh token, rotasi token, dan pencabutan sesi.
+
+Buat matriks izin setiap role untuk seluruh tab Admin Hub Studio.
+
+# 9. FRONTEND INTEGRATION
+
+Perbarui seluruh fungsi JavaScript supaya mengambil dan menyimpan data melalui backend API.
+
+Gunakan `fetch()` sebagai standar komunikasi.
+
+Buat satu modul terpusat, misalnya:
+
+`/assets/js/api.js`
+
+Modul ini harus menangani:
+
+- Base URL API.
+- Authorization/session handling.
+- Pengiriman JSON.
+- Upload multipart/form-data.
+- Penanganan HTTP error.
+- Parsing response.
+- Timeout.
+- Penanganan jaringan terputus.
+- Pesan notifikasi kepada pengguna.
+
+Contoh dasar:
+
+```javascript
+const API_BASE = "/api/v1";
+
+async function apiRequest(endpoint, options = {}) {
+  const response = await fetch(`${API_BASE}${endpoint}`, {
+    credentials: "same-origin",
+    ...options
+  });
+
+  const result = await response.json().catch(() => null);
+
+  if (!response.ok) {
+    throw new Error(
+      result?.message || "Terjadi kesalahan pada server"
+    );
+  }
+
+  return result;
+}
+```
+
+Sesuaikan implementasi akhir dengan kebutuhan Content-Type, FormData, CSRF, dan sesi autentikasi.
+
+## 9.1. Aturan penggunaan localStorage
+
+Hentikan penggunaan localStorage sebagai database aplikasi.
+
+Data berikut wajib tersimpan pada database pusat:
+
+- Games.
+- Categories.
+- Testimonials.
+- Users.
+- XP.
+- Badges.
+- Certificates.
+- Licenses.
+- Statistik.
+- Pengaturan beranda.
+- Konfigurasi aplikasi.
+- Data aktivitas yang perlu disinkronkan.
+
+localStorage atau sessionStorage hanya boleh digunakan untuk:
+
+- Preferensi tema.
+- Preferensi tampilan.
+- Cache ringan yang tidak menjadi sumber data utama.
+- Preferensi pengguna yang tidak sensitif.
+- Informasi sementara yang tidak memengaruhi integritas data.
+
+Cache harus dapat diperbarui dari server.
+
+Jangan pernah menjadikan cache browser sebagai dasar penghitungan XP, jumlah pemain, statistik resmi, status lisensi, atau hak administrator.
+
+# 10. SINKRONISASI REAL-TIME ANTARADMIN
+
+Buat sistem sinkronisasi antarperangkat menggunakan Socket.IO.
+
+Contoh penggunaan:
+
+Admin A pada Komputer A menambahkan game baru.
+
+Alur yang wajib terjadi:
+
+1. Admin A mengirimkan data melalui API.
+2. Backend memvalidasi input dan file.
+3. Backend menyimpan data melalui transaksi database.
+4. Setelah transaksi berhasil, backend mengirimkan event Socket.IO.
+5. Semua klien admin yang memiliki izin menerima notifikasi perubahan.
+6. Klien melakukan refresh data dari API.
+7. Game baru langsung muncul pada Komputer B tanpa harus mengisi ulang data secara manual.
+
+Terapkan konsep yang sama untuk:
+
+- Penambahan game.
+- Pengubahan game.
+- Penghapusan atau pengarsipan game.
+- Penambahan kategori.
+- Perubahan nama kategori.
+- Perubahan ikon kategori.
+- Perubahan testimonial.
+- Perubahan Hero.
+- Perubahan Stupa dan Candi.
+- Perubahan konfigurasi beranda.
+- Perubahan data administrasi lainnya.
+
+Buat event yang konsisten, misalnya:
+
+```text
+game:created
+game:updated
+game:deleted
+category:created
+category:updated
+category:deleted
+testimonial:updated
+homepage:updated
+stats:updated
+```
+
+Ketentuan:
+
+- Verifikasi autentikasi koneksi socket.
+- Batasi event berdasarkan role.
+- Jangan mengirim data rahasia melalui event publik.
+- Gunakan room berdasarkan kebutuhan akses.
+- Hindari duplikasi event.
+- Tangani reconnect.
+- Sediakan fallback polling.
+- Pastikan perubahan dari database tetap tersedia meskipun socket terputus.
+- Jika beberapa administrator mengedit data yang sama, gunakan mekanisme optimistic concurrency/versioning atau `updated_at` untuk mendeteksi konflik.
+
+# 11. ADMIN HUB STUDIO
+
+Pertahankan seluruh fitur Admin Hub Studio dan tingkatkan struktur pengelolaannya.
+
+Minimal terdapat tab:
+
+1. Dashboard.
+2. Kelola Games.
+3. Kelola Categories.
+4. Upload Game Portable.
+5. Kelola Testimonials.
+6. Statistik Pemain.
+7. Kelola Pengguna.
+8. XP dan Badge.
+9. Sertifikat.
+10. Lisensi.
+11. Kustomisasi Beranda.
+12. Manajemen Administrator.
+13. Audit Log.
+14. Pengaturan Sistem.
+
+Setiap tab harus:
+
+- Mengambil data dari backend.
+- Menampilkan status loading.
+- Menampilkan empty state.
+- Menangani error.
+- Memiliki validasi form.
+- Memiliki konfirmasi tindakan penting.
+- Memiliki notifikasi berhasil atau gagal.
+- Mendukung refresh data.
+- Menggunakan hak akses sesuai role.
+
+Fitur tambah, edit, hapus, dan pencarian harus benar-benar berfungsi, bukan sekadar tampilan UI.
+
+# 12. FITUR FRONTEND YANG WAJIB DIPERTAHANKAN
+
+Pastikan seluruh fitur berikut tetap berfungsi.
+
+## A. Halaman Utama
+
+- Hero section.
+- Kustomisasi Hero.
+- Ilustrasi Stupa dan Candi.
+- Daftar kategori.
+- Daftar permainan.
+- Game unggulan.
+- Game terbaru.
+- Game populer.
+- Search.
+- Filter.
+- Sorting.
+- Tampilan responsif.
+
+## B. Area Bermain Game
+
+- iframe srcdoc.
+- Responsive game container.
+- Fullscreen.
+- Tombol kembali.
+- Loading state.
+- Penanganan game gagal dimuat.
+- Dukungan game portable.
+- Dukungan URL game eksternal.
+
+## C. Manajemen Game
+
+- Tambah game.
+- Upload game.
+- Upload thumbnail.
+- Edit informasi.
+- Hapus atau arsipkan.
+- Atur kategori.
+- Atur tingkat kesulitan.
+- Atur tipe game.
+- Atur status premium.
+- Rating dan jumlah pemain.
+
+## D. Manajemen Kategori
+
+- Tambah kategori.
+- Edit kategori.
+- Hapus kategori.
+- Ubah nama.
+- Ubah ikon Font Awesome.
+- Upload ikon ICO.
+- Upload ikon WEBP.
+- Ubah urutan kategori.
+
+## E. Profil dan Gamifikasi
+
+- Login.
+- Profil pengguna.
+- XP.
+- Badge.
+- Riwayat permainan.
+- Statistik pribadi.
+- Leaderboard.
+- Sertifikat.
+
+## F. Tampilan
+
+- Dark Mode.
+- Light Mode.
+- Responsive layout.
+- Animasi yang sudah tersedia.
+- Modal.
+- Notifikasi.
+- Loading indicator.
+
+Jangan mengurangi fitur yang sudah ada hanya karena proses migrasi database.
+
+# 13. MIGRASI DATA DARI LOCALSTORAGE KE DATABASE
+
+Buat mekanisme migrasi data dari aplikasi versi lama.
+
+Tahapan:
+
+1. Inventarisasi seluruh key localStorage.
+2. Identifikasi struktur JSON setiap key.
+3. Petakan struktur lama ke tabel database baru.
+4. Buat script migrasi yang membaca data lama.
+5. Validasi data sebelum impor.
+6. Tangani data duplikat.
+7. Tangani data tidak lengkap.
+8. Simpan laporan migrasi.
+9. Sediakan mekanisme backup sebelum migrasi.
+10. Berikan hasil migrasi berupa total berhasil, dilewati, dan gagal.
+
+Jangan langsung menghapus data localStorage sebelum migrasi berhasil diverifikasi.
+
+Apabila diperlukan, sediakan fitur import data lama dari file JSON melalui Admin Hub Studio.
+
+# 14. STRUKTUR FOLDER PROYEK
+
+Susun folder secara modular dan mudah dipelihara.
+
+Gunakan struktur referensi berikut:
+
+```text
+pusat-games-buddhis/
+│
+├── frontend/
+│   ├── index.html
+│   ├── pages/
+│   ├── components/
+│   ├── assets/
+│   │   ├── css/
+│   │   ├── js/
+│   │   │   ├── api.js
+│   │   │   ├── auth.js
+│   │   │   ├── games.js
+│   │   │   ├── categories.js
+│   │   │   ├── admin.js
+│   │   │   ├── statistics.js
+│   │   │   ├── settings.js
+│   │   │   └── socket.js
+│   │   ├── images/
+│   │   ├── icons/
+│   │   └── fonts/
+│   └── uploads/
+│
+├── backend/
+│   ├── prisma/
+│   │   ├── schema.prisma
+│   │   ├── migrations/
+│   │   └── seed.js
+│   │
+│   ├── src/
+│   │   ├── config/
+│   │   ├── controllers/
+│   │   ├── services/
+│   │   ├── repositories/
+│   │   ├── routes/
+│   │   ├── middleware/
+│   │   ├── validators/
+│   │   ├── sockets/
+│   │   ├── utils/
+│   │   └── app.js
+│   │
+│   ├── storage/
+│   │   ├── games/
+│   │   ├── thumbnails/
+│   │   └── icons/
+│   │
+│   ├── tests/
+│   ├── server.js
+│   ├── package.json
+│   └── .env.example
+│
+├── scripts/
+│   ├── migrate-localstorage.js
+│   ├── backup-database.js
+│   └── restore-database.js
+│
+├── docs/
+│   ├── ARCHITECTURE.md
+│   ├── API.md
+│   ├── DATABASE.md
+│   ├── DEPLOYMENT.md
+│   └── SECURITY.md
+│
+├── .gitignore
+└── README.md
+```
+
+Struktur tersebut merupakan acuan. Lakukan penyesuaian berdasarkan source code asli.
+
+Jangan memindahkan atau mengganti file tanpa memastikan seluruh referensi dan dependensinya diperbarui.
+
+# 15. KEAMANAN APLIKASI
+
+Terapkan prinsip Security by Design.
+
+Minimal:
+
+- Password hashing.
+- Authentication dan authorization server-side.
+- RBAC.
+- SQL injection prevention melalui ORM dan query terparameterisasi.
+- XSS protection.
+- CSRF protection.
+- CORS yang dibatasi.
+- Content Security Policy.
+- HTTP security headers.
+- Rate limiting.
+- Validasi input.
+- Validasi upload.
+- Pembatasan ukuran file.
+- Penamaan file secara aman.
+- Audit log.
+- Penanganan error tanpa membocorkan stack trace pada produksi.
+- Perlindungan endpoint administrasi.
+- Proteksi data pengguna.
+- Backup database.
+- HTTPS.
+
+Untuk upload game, bedakan antara file yang aman untuk disimpan dan konten yang aman untuk dijalankan.
+
+Jangan mengeksekusi file upload menggunakan Node.js di server.
+
+Jangan memberikan akses langsung kepada browser untuk mengakses database.
+
+Jangan menyimpan credential database di frontend.
+
+# 16. DEPLOYMENT DAN HOSTING ONLINE
+
+Siapkan aplikasi agar dapat dipasang pada subdomain.
+
+Contoh:
+
+`https://games.namasekolah.com`
+
+Sertakan panduan deployment untuk server VPS atau hosting yang mendukung Node.js dan PostgreSQL.
+
+Minimal:
+
+## A. Konfigurasi Server
+
+- Instalasi Node.js.
+- Instalasi PostgreSQL.
+- Instalasi Nginx.
+- Instalasi PM2 atau mekanisme process manager yang sesuai.
+- Instalasi dependensi.
+- Konfigurasi environment.
+- Migrasi database.
+- Seed administrator awal.
+- Konfigurasi direktori storage.
+
+## B. Domain dan Subdomain
+
+Jelaskan:
+
+1. Cara membuat subdomain pada panel hosting.
+2. Cara mengarahkan DNS A Record.
+3. Cara mengarahkan Nginx ke aplikasi.
+4. Cara menerapkan HTTPS menggunakan Let's Encrypt.
+5. Cara mengaktifkan reverse proxy.
+6. Cara mendukung koneksi WebSocket.
+7. Cara menguji endpoint API dari domain produksi.
+
+## C. Konfigurasi Environment
+
+Buat `.env.example`, misalnya:
+
+```env
+NODE_ENV=production
+PORT=3000
+
+DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/pusat_games_buddhis"
+
+SESSION_SECRET="GANTI_DENGAN_SECRET_ACAK"
+SESSION_COOKIE_SECURE=true
+
+APP_URL="https://games.namasekolah.com"
+API_BASE_URL="/api/v1"
+
+UPLOAD_DIR="./storage"
+MAX_UPLOAD_SIZE_MB=30
+```
+
+Gunakan konfigurasi yang sesuai pada implementasi akhir.
+
+Jangan pernah menggunakan password atau secret contoh tersebut sebagai credential produksi.
+
+## D. Operasional
+
+Sertakan:
+
+- Perintah menjalankan aplikasi.
+- Perintah build bila diperlukan.
+- Perintah migrasi database.
+- Perintah backup.
+- Perintah restore.
+- Restart aplikasi.
+- Monitoring log.
+- Health check.
+- Pembaruan aplikasi.
+- Pemulihan apabila aplikasi gagal berjalan.
+
+Pastikan penyimpanan upload berada pada storage persisten, bukan direktori sementara yang dapat hilang ketika aplikasi di-restart atau di-deploy ulang.
+
+Sertakan alternatif Docker Compose jika relevan.
+
+# 17. TESTING DAN QUALITY ASSURANCE
+
+Buat pengujian yang dapat dijalankan, bukan hanya daftar pengujian.
+
+Gunakan tools yang sesuai, seperti:
+
+- Vitest atau Jest.
+- Supertest.
+- Playwright untuk pengujian browser jika diperlukan.
+
+Uji seluruh skenario berikut:
+
+## A. Database
+
+- Koneksi database.
+- Insert.
+- Update.
+- Delete.
+- Relasi.
+- Transaksi.
+- Constraint.
+- Migrasi.
+
+## B. REST API
+
+- GET.
+- POST.
+- PUT.
+- PATCH.
+- DELETE.
+- Validasi input.
+- Unauthorized.
+- Forbidden.
+- Pagination.
+- Error handling.
+
+## C. Sinkronisasi
+
+Skenario wajib:
+
+1. Buka aplikasi pada Komputer A.
+2. Buka aplikasi pada Komputer B.
+3. Login sebagai administrator sesuai hak akses.
+4. Tambahkan game dari Komputer A.
+5. Pastikan game langsung muncul pada Komputer B.
+6. Ubah kategori di Komputer B.
+7. Pastikan perubahan tersedia pada Komputer A.
+8. Restart backend.
+9. Pastikan seluruh data tetap tersimpan.
+10. Putuskan koneksi socket dan pastikan fallback polling berfungsi.
+
+## D. Game Portable
+
+- Upload HTML.
+- Upload JSON.
+- Upload JS.
+- Upload paket ZIP.
+- Validasi file invalid.
+- Pengujian iframe srcdoc.
+- Pengujian aset pendukung.
+- Pengujian fullscreen.
+- Pengujian responsive.
+- Pengujian isolasi iframe.
+
+## E. Keamanan
+
+- Login gagal.
+- Akses admin tanpa login.
+- Hak akses antarrole.
+- Percobaan SQL injection.
+- XSS.
+- CSRF.
+- Upload file berbahaya.
+- Path traversal.
+- File melebihi batas.
+- Akses URL storage yang tidak sah.
+
+## F. Frontend
+
+Pastikan seluruh fitur versi lama tetap berfungsi setelah migrasi.
+
+Buat laporan hasil pengujian dengan status PASS, FAIL, atau NOT TESTED.
+
+Jangan menyatakan pengujian berhasil apabila belum benar-benar dijalankan.
+
+# 18. STANDAR KUALITAS KODE
+
+Kode harus:
+
+- Modular.
+- Konsisten.
+- Mudah dibaca.
+- Memiliki komentar untuk logika penting.
+- Memiliki error handling.
+- Menggunakan async/await dengan benar.
+- Memisahkan route, controller, service, dan repository.
+- Memiliki validasi input.
+- Meminimalkan duplikasi kode.
+- Tidak menggunakan konfigurasi rahasia secara hardcode.
+- Tidak mengandung fungsi palsu atau placeholder yang seolah-olah sudah berfungsi.
+- Tidak meninggalkan endpoint atau tombol tanpa implementasi.
+
+Jangan memberikan potongan kode yang tidak dapat diintegrasikan.
+
+Untuk setiap file yang dibuat atau diubah, berikan:
+
+1. Lokasi file.
+2. Kegunaan file.
+3. Kode lengkap.
+4. Dependensi yang dibutuhkan.
+5. Cara menjalankan atau mengujinya.
+
+# 19. URUTAN PENGEMBANGAN WAJIB
+
+Kerjakan dalam urutan berikut agar tidak merusak aplikasi yang sudah ada.
+
+**FASE 1 – AUDIT APLIKASI LAMA**
+
+- Periksa struktur proyek.
+- Petakan fitur.
+- Identifikasi localStorage.
+- Identifikasi dependensi.
+- Buat laporan audit.
+- Buat rencana migrasi.
+
+**FASE 2 – DESAIN ARSITEKTUR**
+
+- Buat diagram arsitektur.
+- Buat diagram relasi database (ERD).
+- Definisikan kontrak API.
+- Tentukan strategi autentikasi.
+- Tentukan mekanisme penyimpanan game.
+- Tentukan strategi sinkronisasi.
+
+**FASE 3 – DATABASE**
+
+- Buat schema Prisma.
+- Buat migration.
+- Buat seed data.
+- Buat akun administrator awal secara aman.
+- Uji relasi database.
+
+**FASE 4 – BACKEND**
+
+- Buat server Express.
+- Buat middleware keamanan.
+- Buat autentikasi.
+- Buat RBAC.
+- Buat seluruh REST API.
+- Buat upload handler.
+- Buat pengelolaan game.
+- Buat sistem XP.
+- Buat statistik.
+- Buat Socket.IO.
+- Buat audit log.
+
+**FASE 5 – FRONTEND**
+
+- Buat modul API.
+- Integrasikan autentikasi.
+- Migrasikan pengelolaan game.
+- Migrasikan kategori.
+- Integrasikan upload game.
+- Integrasikan testimonial.
+- Integrasikan statistik.
+- Integrasikan XP dan sertifikat.
+- Integrasikan Hero dan Stupa/Candi.
+- Integrasikan Admin Hub Studio.
+- Pertahankan Dark Mode.
+- Pertahankan seluruh UI lama.
+
+**FASE 6 – MIGRASI DATA**
+
+- Buat script migrasi localStorage.
+- Uji import.
+- Validasi data.
+- Buat laporan hasil migrasi.
+
+**FASE 7 – REAL-TIME SYNC**
+
+- Implementasikan Socket.IO.
+- Uji perubahan antarperangkat.
+- Implementasikan fallback polling.
+- Uji konflik perubahan.
+
+**FASE 8 – TESTING**
+
+- Uji backend.
+- Uji database.
+- Uji frontend.
+- Uji game portable.
+- Uji keamanan.
+- Uji sinkronisasi.
+
+**FASE 9 – DEPLOYMENT**
+
+- Siapkan environment produksi.
+- Konfigurasikan subdomain.
+- Konfigurasikan HTTPS.
+- Konfigurasikan Nginx.
+- Jalankan migrasi.
+- Aktifkan process manager.
+- Uji aplikasi dari jaringan internet.
+
+# 20. FORMAT OUTPUT YANG WAJIB DIHASILKAN
+
+Jangan hanya memberikan penjelasan konseptual.
+
+Hasil akhir harus mencakup:
+
+### A. Dokumen Arsitektur
+
+- Penjelasan arsitektur.
+- Diagram komunikasi frontend-backend-database.
+- Diagram ERD.
+- Alur autentikasi.
+- Alur upload game.
+- Alur sinkronisasi antaradmin.
+
+### B. Database
+
+- Schema Prisma lengkap.
+- SQL migration.
+- Seed database.
+- Data contoh.
+- Relasi seluruh tabel.
+
+### C. Backend
+
+- package.json.
+- app.js.
+- server.js.
+- Seluruh routes.
+- Controllers.
+- Services.
+- Repositories.
+- Middleware.
+- Validators.
+- Socket.IO.
+- Upload handler.
+- Authentication.
+- RBAC.
+- Error handling.
+
+### D. Frontend
+
+- File HTML yang diperbarui.
+- Modul api.js.
+- Modul auth.js.
+- Modul socket.js.
+- Modul games.js.
+- Modul categories.js.
+- Modul admin.js.
+- Modul statistics.js.
+- Modul settings.js.
+- Pembaruan modul lainnya sesuai hasil audit.
+
+Jangan menghilangkan bagian source code lama yang masih dibutuhkan.
+
+### E. Migrasi
+
+- Script migrasi localStorage.
+- Mapping data lama ke database baru.
+- Petunjuk migrasi awal.
+- Mekanisme validasi migrasi.
+
+### F. Deployment
+
+- `.env.example`.
+- Konfigurasi Nginx.
+- Konfigurasi process manager.
+- Petunjuk domain dan subdomain.
+- Petunjuk SSL.
+- Panduan instalasi database.
+- Backup dan restore.
+- Panduan menjalankan aplikasi.
+
+### G. Dokumentasi
+
+Buat:
+
+- README.md.
+- ARCHITECTURE.md.
+- DATABASE.md.
+- API.md.
+- DEPLOYMENT.md.
+- SECURITY.md.
+- MIGRATION.md.
+
+# 21. KRITERIA KEBERHASILAN AKHIR
+
+Pengembangan dinyatakan berhasil jika memenuhi seluruh kriteria berikut:
+
+1. Aplikasi tetap memiliki tampilan dan fungsi utama seperti versi lama.
+2. Seluruh data inti tersimpan di database SQL pusat.
+3. Data dapat diakses dari banyak komputer dan browser.
+4. Admin Komputer A dapat menambah game dan Admin Komputer B dapat melihatnya tanpa input ulang.
+5. Perubahan kategori tersinkronisasi antarperangkat.
+6. Upload game portable berjalan dengan baik.
+7. Game HTML5 tetap dapat dimainkan melalui iframe srcdoc.
+8. File pendukung permainan dapat dikelola dengan aman.
+9. Admin Hub Studio tetap berfungsi lengkap.
+10. Hak akses administrator diperiksa oleh backend.
+11. Sistem XP dan sertifikat tersimpan permanen di database.
+12. Statistik menampilkan data dari database pusat.
+13. Kustomisasi Hero, Stupa, dan Candi tersimpan di server.
+14. Dark Mode dan tampilan responsif tetap berfungsi.
+15. Aplikasi dapat berjalan pada subdomain dengan HTTPS.
+16. Data tidak hilang ketika backend di-restart.
+17. Penggunaan localStorage sebagai database permanen sudah dihilangkan.
+18. API dan database memiliki validasi serta proteksi keamanan.
+19. Backup dan restore database dapat dilakukan.
+20. Tersedia dokumentasi instalasi dan pengelolaan aplikasi.
+
+# 22. INSTRUKSI KHUSUS UNTUK PROSES GENERASI KODE
+
+Terapkan ketentuan berikut secara ketat:
+
+**Jangan membuat ulang aplikasi tanpa memeriksa source code lama.**
+
+Lakukan audit terlebih dahulu apabila file proyek tersedia.
+
+**Jangan hanya memberikan contoh kode singkat.**
+
+Setiap file yang diminta harus berisi source code lengkap dan dapat digunakan.
+
+**Jangan memberikan pseudo-code untuk fungsi utama.**
+
+Seluruh fitur CRUD, upload, autentikasi, sinkronisasi, penghitungan XP, dan statistik harus memiliki implementasi nyata.
+
+**Jangan menghilangkan fitur lama.**
+
+Apabila terdapat fungsi yang belum dapat dimigrasikan secara langsung, jelaskan kendalanya dan buat solusi pengganti yang tetap mempertahankan fungsi penggunaannya.
+
+**Jangan menaruh seluruh kode dalam satu file besar.**
+
+Pisahkan frontend, backend, konfigurasi, database, dan dokumentasi secara terstruktur.
+
+**Jangan mengasumsikan hosting mendukung Node.js.**
+
+Jelaskan persyaratan hosting dan berikan panduan deployment yang sesuai. Jika hosting hanya menyediakan PHP/MySQL tanpa dukungan proses Node.js, jelaskan perubahan arsitektur yang diperlukan daripada menyajikan konfigurasi yang tidak bisa dijalankan.
+
+**Jangan mengklaim aplikasi sudah siap produksi hanya karena kode berhasil dibuat.**
+
+Nyatakan dengan jujur komponen yang sudah diimplementasikan, yang sudah diuji, yang belum diuji, dan yang membutuhkan konfigurasi server.
+
+Utamakan kestabilan, keamanan, kompatibilitas, dan kesinambungan seluruh fitur aplikasi.
+
+---
+
+# TARGET AKHIR
+
+Hasil akhir yang ingin dibangun adalah:
+
+**PUSAT GAMES BUDDHIS – FULL-STACK CENTRALIZED GAME MANAGEMENT PLATFORM**
+
+Sebuah platform permainan edukasi Buddhis yang dapat dikelola secara terpusat, digunakan dari berbagai komputer dan perangkat, memiliki database permanen, mendukung upload game portable, mempunyai Admin Hub Studio yang aman, menyediakan sistem XP dan sertifikat, serta siap dipasang secara online menggunakan subdomain sekolah.
+
+Bangun sistem secara profesional, modular, aman, terdokumentasi, mudah dipelihara, dan siap dikembangkan pada masa mendatang.
