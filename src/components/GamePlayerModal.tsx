@@ -1,5 +1,5 @@
 import React from 'react';
-import { Game } from '../types';
+import { Game, UserProfile } from '../types';
 import {
   X,
   Maximize2,
@@ -45,6 +45,7 @@ interface GamePlayerModalProps {
     gameId?: number
   ) => Promise<void>;
   playerName: string;
+  currentUser?: UserProfile | null;
 }
 
 type DeviceMode = 'full' | 'mobile' | 'tablet';
@@ -297,6 +298,7 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
   onClose,
   onSubmitScore,
   playerName,
+  currentUser,
 }) => {
   const [isFullscreen, setIsFullscreen] = React.useState(false);
   const [deviceMode, setDeviceMode] = React.useState<DeviceMode>('full');
@@ -311,6 +313,7 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
   const [showScoreInputModal, setShowScoreInputModal] = React.useState(false);
 
   const hasRecordedAutoScoreRef = React.useRef(false);
+  const recordedGameSessionKeyRef = React.useRef<string>('');
   const latestPortableScoreRef = React.useRef(0);
   const liveSessionRef = React.useRef({
     game,
@@ -325,14 +328,24 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
   // Track access log once per opened game session
   React.useEffect(() => {
     if (!game?.id) return;
+    const sessionKey = `${game.id}::${currentUser?.id || playerName}`;
+    if (recordedGameSessionKeyRef.current === sessionKey) {
+      return;
+    }
+    recordedGameSessionKeyRef.current = sessionKey;
+
     let isMounted = true;
+    const resolvedName = currentUser?.name || playerName || 'Tamu Dharma';
+    const resolvedRole = currentUser?.role || (currentUser?.id ? 'user' : 'tamu');
+
     api.recordGameAccess({
       gameId: game.id,
       gameTitle: game.title,
       gameCategory: game.category,
       user: {
-        name: playerName,
-        role: playerName === 'Siswa Berkesadaran' ? 'tamu' : 'member',
+        id: currentUser?.id,
+        name: resolvedName,
+        role: resolvedRole,
       },
       clientInfo: {
         screen: `${window.innerWidth}x${window.innerHeight}`,
@@ -349,8 +362,7 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
     return () => {
       isMounted = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [game?.id, playerName]);
+  }, [game?.id, game?.title, game?.category, playerName, currentUser?.id, currentUser?.name, currentUser?.role]);
 
   // Periodic heartbeat & duration counter
   React.useEffect(() => {

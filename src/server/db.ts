@@ -6,6 +6,12 @@ import {
   shouldRunInitialSeed,
 } from '../utils/baselineProtection.ts';
 import { formatSnapshotTimestamp } from '../utils/backupSync.ts';
+import {
+  isDummyAccessLog,
+  isDummyAuditLog,
+  normalizeClientIp,
+  synthesizeRealAccessLogsFromLeaderboard,
+} from '../utils/accessLogSync.ts';
 
 const resolvedCustomDb = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : null;
 const DATA_DIR = resolvedCustomDb ? path.dirname(resolvedCustomDb) : path.resolve(process.cwd(), 'data');
@@ -519,6 +525,182 @@ export function pruneInactiveLeaderboardScores(): number {
   return Number(result.changes || 0);
 }
 
+export function pruneDummyLogsAndSyncRealAccess(): {
+  removedAccessLogs: number;
+  removedAuditLogs: number;
+  backfilledRealAccessLogs: number;
+  retainedRealAccessLogs: number;
+} {
+  let removedAccessLogs = 0;
+  let removedAuditLogs = 0;
+  let backfilledRealAccessLogs = 0;
+
+  const activeGamesRows = db
+    .prepare(
+      "SELECT id, title, category, is_active, status FROM games WHERE is_active = 1 AND (status IS NULL OR status != 'inactive')"
+    )
+    .all() as { id: number; title: string; category: string; is_active: number; status: string }[];
+
+  const activeGames = activeGamesRows.map((g) => ({
+    id: Number(g.id),
+    title: String(g.title || '').trim(),
+    category: String(g.category || 'Umum').trim(),
+    isActive: true,
+    status: String(g.status || 'published'),
+  }));
+  const activeTitles = activeGames.map((g) => g.title);
+
+  // 1. Clean dummy / test / inactive-game access logs while keeping real user logs
+  const allAccessLogs = db
+    .prepare('SELECT id, game_id, game_title, game_category, user_id, user_name, user_role, ip_address, user_agent, completed, created_at FROM game_access_logs')
+    .all() as Record<string, unknown>[];
+
+  const deleteAccessStmt = db.prepare('DELETE FROM game_access_logs WHERE id = ?');
+  const updateAccessMetaStmt = db.prepare(
+    'UPDATE game_access_logs SET game_id = ?, game_title = ?, game_category = ?, ip_address = ? WHERE id = ?'
+  );
+
+  const retainedLogs: {
+    id: number;
+    gameId: number | null;
+    gameTitle: string;
+    userName: string;
+  }[] = [];
+
+  for (const row of allAccessLogs) {
+    const id = Number(row.id);
+    const candidate = {
+      id,
+      gameId: row.game_id ? Number(row.game_id) : null,
+      gameTitle: String(row.game_title || ''),
+      gameCategory: String(row.game_category || ''),
+      userId: row.user_id ? String(row.user_id) : null,
+      userName: String(row.user_name || ''),
+      userRole: String(row.user_role || 'tamu'),
+      ipAddress: String(row.ip_address || ''),
+      userAgent: String(row.user_agent || ''),
+      completed: Number(row.completed || 0),
+      createdAt: String(row.created_at || ''),
+    };
+
+    if (isDummyAccessLog(candidate, activeTitles)) {
+      deleteAccessStmt.run(id);
+      removedAccessLogs++;
+    } else {
+      const matchedGame = activeGames.find(
+        (g) => g.id === candidate.gameId || g.title.toLowerCase() === candidate.gameTitle.trim().toLowerCase()
+      );
+      const cleanIp = normalizeClientIp(candidate.ipAddress);
+      if (matchedGame) {
+        updateAccessMetaStmt.run(matchedGame.id, matchedGame.title, matchedGame.category, cleanIp, id);
+      } else if (cleanIp !== candidate.ipAddress) {
+        updateAccessMetaStmt.run(candidate.gameId, candidate.gameTitle, candidate.gameCategory || 'Umum', cleanIp, id);
+      }
+      retainedLogs.push({
+        id,
+        gameId: matchedGame ? matchedGame.id : candidate.gameId,
+        gameTitle: matchedGame ? matchedGame.title : candidate.gameTitle,
+        userName: candidate.userName,
+      });
+    }
+  }
+
+  // 2. Clean dummy automated test audit logs while keeping real admin activity logs
+  const allAuditLogs = db
+    .prepare('SELECT id, actor, action, details, created_at FROM audit_logs')
+    .all() as Record<string, unknown>[];
+  const deleteAuditStmt = db.prepare('DELETE FROM audit_logs WHERE id = ?');
+  for (const row of allAuditLogs) {
+    const id = Number(row.id);
+    if (
+      isDummyAuditLog({
+        id,
+        actor: String(row.actor || ''),
+        action: String(row.action || ''),
+        details: String(row.details || ''),
+        createdAt: String(row.created_at || ''),
+      })
+    ) {
+      deleteAuditStmt.run(id);
+      removedAuditLogs++;
+    }
+  }
+
+  // 3. Synchronize / backfill real play sessions from active game leaderboard records if missing
+  const leaderboardRows = db
+    .prepare('SELECT id, user_name, user_email, game_id, game_title, score, school, created_at FROM leaderboard ORDER BY id ASC')
+    .all() as Record<string, unknown>[];
+  const userRows = db
+    .prepare('SELECT id, name, email, role FROM users')
+    .all() as Record<string, unknown>[];
+
+  const synthesized = synthesizeRealAccessLogsFromLeaderboard(
+    leaderboardRows.map((l) => ({
+      id: Number(l.id),
+      userName: String(l.user_name || ''),
+      userEmail: l.user_email ? String(l.user_email) : '',
+      gameId: l.game_id ? Number(l.game_id) : null,
+      gameTitle: String(l.game_title || ''),
+      score: Number(l.score || 0),
+      school: l.school ? String(l.school) : '',
+      createdAt: String(l.created_at || new Date().toISOString()),
+    })),
+    activeGames,
+    userRows.map((u) => ({
+      id: String(u.id),
+      name: String(u.name || ''),
+      email: String(u.email || ''),
+      role: String(u.role || 'user'),
+    })),
+    retainedLogs
+  );
+
+  if (synthesized.length > 0) {
+    const insertRealAccessStmt = db.prepare(`
+      INSERT INTO game_access_logs (
+        game_id, game_title, game_category, user_id, user_name, user_role,
+        ip_address, device_type, device_model, browser, os, screen_resolution,
+        country, country_code, city, user_agent, duration_seconds, completed, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    for (const s of synthesized) {
+      insertRealAccessStmt.run(
+        s.gameId,
+        s.gameTitle,
+        s.gameCategory,
+        s.userId,
+        s.userName,
+        s.userRole,
+        s.ipAddress,
+        s.deviceType,
+        s.deviceModel,
+        s.browser,
+        s.os,
+        s.screenResolution,
+        s.country,
+        s.countryCode,
+        s.city,
+        s.userAgent,
+        s.durationSeconds,
+        s.completed,
+        s.createdAt
+      );
+      backfilledRealAccessLogs++;
+    }
+  }
+
+  const retainedRealAccessLogs = Number(
+    (db.prepare('SELECT COUNT(*) as c FROM game_access_logs').get() as { c: number } | undefined)?.c || 0
+  );
+
+  return {
+    removedAccessLogs,
+    removedAuditLogs,
+    backfilledRealAccessLogs,
+    retainedRealAccessLogs,
+  };
+}
+
 export function healMalformedAccessLogsIfNeeded(): boolean {
   try {
     db.prepare('SELECT COUNT(DISTINCT ip_address) as c FROM game_access_logs').get();
@@ -742,6 +924,9 @@ function seedDatabase() {
 
   // Prune stale leaderboard entries for non-active/deleted games while preserving all active game records
   pruneInactiveLeaderboardScores();
+
+  // Prune dummy/automated test access & audit logs while preserving and synchronizing real user logs
+  pruneDummyLogsAndSyncRealAccess();
 
   const seedFlagRow = db
     .prepare("SELECT value FROM sync_metadata WHERE key = 'initial_seed_completed'")

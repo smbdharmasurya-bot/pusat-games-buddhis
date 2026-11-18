@@ -66,6 +66,7 @@ import {
   filterCertificates,
   isCertificateActive,
 } from '../utils/certificateSync';
+import { resolveCountryFlagEmoji } from '../utils/accessLogSync';
 import {
   isValidSqliteHeader,
   parseBackupPayload,
@@ -353,6 +354,10 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
   }, [settings]);
 
   const latestAuditId = auditLogs[0]?.id ?? 0;
+  const totalGamePlayers = React.useMemo(
+    () => games.reduce((sum, g) => sum + (Number(g.players) || 0), 0),
+    [games]
+  );
 
   React.useEffect(() => {
     if (isOpen && isAuthenticated) {
@@ -366,7 +371,32 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
         loadBackupSnapshots();
       }
     }
-  }, [isOpen, isAuthenticated, activeTab, latestAuditId, loadUsers, loadLeaderboard, loadAnalytics, loadBackupSnapshots]);
+  }, [isOpen, isAuthenticated, activeTab, latestAuditId, totalGamePlayers, loadUsers, loadLeaderboard, loadAnalytics, loadBackupSnapshots]);
+
+  // Real-time auto-polling when Admin Hub is viewing Statistik & Log Akses
+  React.useEffect(() => {
+    if (!isOpen || !isAuthenticated || activeTab !== 'stats') return;
+    const interval = window.setInterval(() => {
+      void loadAnalytics();
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [isOpen, isAuthenticated, activeTab, loadAnalytics]);
+
+  const handlePruneDummyLogs = async () => {
+    try {
+      setIsLoadingAnalytics(true);
+      const res = await api.pruneDummyAccessLogs();
+      showToast(res.message, 'success');
+      playCorrectSound();
+      await loadAnalytics();
+      onDataChanged();
+    } catch (err) {
+      showToast((err as Error).message || 'Gagal membersihkan log dummy', 'error');
+      playIncorrectSound();
+    } finally {
+      setIsLoadingAnalytics(false);
+    }
+  };
 
   const handleOpenResetScoresModal = (gameTitle: string | null = null) => {
     setResetScoresGameTitle(gameTitle);
@@ -3689,16 +3719,22 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
                   {/* Header & Controls */}
                   <div className="flex flex-wrap items-center justify-between gap-4 bg-slate-50 dark:bg-slate-800/60 p-4 rounded-2xl border border-slate-200 dark:border-slate-700">
                     <div>
-                      <h4 className="font-heading font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
-                        <BarChart3 className="w-4 h-4 text-amber-500" />
-                        <span>Pemantauan & Statistik Akses Pengguna Real-Time</span>
-                      </h4>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h4 className="font-heading font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                          <BarChart3 className="w-4 h-4 text-amber-500" />
+                          <span>Pemantauan & Statistik Akses Pengguna Real-Time</span>
+                        </h4>
+                        <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300 border border-emerald-300/60 dark:border-emerald-800">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                          Live Sinkron Otomatis (Log Real)
+                        </span>
+                      </div>
                       <p className="text-[11px] text-slate-500 mt-0.5">
-                        Mencatat setiap pemain (login maupun tamu), perangkat (HP/tablet/PC), IP address, negara, browser, dan penyelesaian game.
+                        Memantau secara langsung setiap pemain real (login maupun tamu), perangkat (HP/tablet/PC), IP address, negara, browser, dan penyelesaian game aktif.
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <button
                         onClick={loadAnalytics}
                         disabled={isLoadingAnalytics}
@@ -3707,6 +3743,16 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
                       >
                         <RefreshCw className={`w-3.5 h-3.5 ${isLoadingAnalytics ? 'animate-spin' : ''}`} />
                         <span>Segarkan</span>
+                      </button>
+
+                      <button
+                        onClick={handlePruneDummyLogs}
+                        disabled={isLoadingAnalytics}
+                        className="bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold px-3 py-2 rounded-xl shadow flex items-center gap-1.5 transition cursor-pointer"
+                        title="Bersihkan log uji/dummy dan pertahankan log pengguna real"
+                      >
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        <span>Bersihkan Log Dummy</span>
                       </button>
 
                       <button
@@ -3728,7 +3774,7 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
                         title="Bersihkan seluruh log akses pengguna"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
-                        <span>Bersihkan Log</span>
+                        <span>Reset Semua Log</span>
                       </button>
                     </div>
                   </div>
@@ -3878,7 +3924,7 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
                           {accessStats?.countries && accessStats.countries.length > 0 ? (
                             accessStats.countries.map(c => (
                               <span key={c.name} className="px-2 py-0.5 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 text-[11px] font-medium border border-emerald-200 dark:border-emerald-900/40">
-                                🇮🇩 {c.name}: <strong>{c.count}</strong>
+                                {resolveCountryFlagEmoji(c.code, c.name)} {c.name}: <strong>{c.count}</strong>
                               </span>
                             ))
                           ) : (

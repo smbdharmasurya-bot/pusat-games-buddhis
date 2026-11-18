@@ -364,6 +364,30 @@ export const api = {
     });
   },
 
+  async pruneDummyAccessLogs(): Promise<{
+    message: string;
+    removedAccessLogs?: number;
+    removedAuditLogs?: number;
+    backfilledRealAccessLogs?: number;
+    retainedRealAccessLogs?: number;
+  }> {
+    const res = await fetch(`${API_BASE}/analytics/prune-dummy`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+      },
+    });
+    const json = await res.json().catch(() => null);
+    if (!res.ok) {
+      throw new Error(json?.message || `HTTP ${res.status}: Gagal membersihkan log dummy`);
+    }
+    return {
+      message: json?.message || 'Log dummy berhasil dibersihkan!',
+      ...(json?.data || {}),
+    };
+  },
+
   // Backup Export, Import & Snapshots
   async exportBackupJson(): Promise<BackupPayload> {
     return fetchJSON<BackupPayload>('/backup/export');

@@ -610,7 +610,8 @@ export default function App() {
           game={activeGame}
           onClose={() => setActiveGame(null)}
           onSubmitScore={handleSubmitScore}
-          playerName={currentUser?.name || 'Siswa Berkesadaran'}
+          playerName={currentUser?.name || 'Tamu Dharma'}
+          currentUser={currentUser}
         />
       )}
 

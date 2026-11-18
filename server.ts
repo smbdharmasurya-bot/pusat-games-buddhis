@@ -9,6 +9,7 @@ import {
   DB_PATH,
   BACKUP_DIR,
   pruneInactiveLeaderboardScores,
+  pruneDummyLogsAndSyncRealAccess,
   getBaselineDatabaseCounts,
   ensureAutoBaselineSnapshotOnStartup,
 } from './src/server/db.ts';
@@ -25,6 +26,10 @@ import {
   mergeExistingAndImportedSettings,
   validatePublishedSyncUrl,
 } from './src/utils/baselineProtection.ts';
+import {
+  isDummyAccessLog,
+  normalizeClientIp,
+} from './src/utils/accessLogSync.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -761,11 +766,13 @@ app.delete('/api/v1/games/:id', (req: Request, res: Response) => {
 
     db.prepare('DELETE FROM games WHERE id = ?').run(id);
     db.prepare('DELETE FROM leaderboard WHERE game_id = ? OR LOWER(TRIM(game_title)) = LOWER(TRIM(?))').run(id, g.title);
+    db.prepare('DELETE FROM game_access_logs WHERE game_id = ? OR LOWER(TRIM(game_title)) = LOWER(TRIM(?))').run(id, g.title);
     pruneInactiveLeaderboardScores();
 
     recordAudit('Admin', 'DELETE_GAME', `Deleted game: ${g.title}`);
     broadcastEvent('game:deleted', { id, title: g.title });
     broadcastEvent('leaderboard:updated', { deletedGame: g.title });
+    broadcastEvent('stats:updated', { deletedGame: g.title });
 
     res.json({ success: true, message: 'Permainan berhasil dihapus' });
   } catch (error) {
@@ -1656,18 +1663,72 @@ app.post('/api/v1/analytics/game-access', (req: Request, res: Response) => {
       return;
     }
 
-    const uaString = req.headers['user-agent'] || '';
+    const uaString = String(req.headers['user-agent'] || '');
     const { deviceType, deviceModel, browser, os } = parseDeviceInfo(uaString);
     const { country, code: countryCode, city } = resolveClientLocation(req, clientInfo?.timezone);
 
-    // Resolve IP address
-    const forwarded = req.headers['x-forwarded-for'];
-    const ipAddress = (typeof forwarded === 'string' ? forwarded.split(',')[0].trim() : (req.headers['x-real-ip'] as string)) || req.socket.remoteAddress || '127.0.0.1';
+    // Resolve and normalize client IP address
+    const cfIp = req.headers['cf-connecting-ip'] as string | undefined;
+    const forwarded = req.headers['x-forwarded-for'] as string | undefined;
+    const realIp = req.headers['x-real-ip'] as string | undefined;
+    const ipAddress = normalizeClientIp(cfIp || forwarded || realIp || req.socket.remoteAddress || '127.0.0.1');
 
     const userId = user?.id || null;
-    const userName = user?.name ? user.name.trim() : 'Tamu / Pengunjung Tanpa Login';
-    const userRole = user?.role || (user?.id ? 'member' : 'tamu');
+    const userName = user?.name ? String(user.name).trim() : 'Tamu Dharma';
+    const userRole = user?.role || (user?.id ? 'user' : 'tamu');
     const screenRes = clientInfo?.screen || null;
+
+    // Resolve against active games so access logs stay synchronized with the active game catalog
+    const matchedGame = (
+      gameId
+        ? db.prepare("SELECT id, title, category FROM games WHERE id = ? AND is_active = 1 AND (status IS NULL OR status != 'inactive')").get(Number(gameId))
+        : db.prepare("SELECT id, title, category FROM games WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) AND is_active = 1 AND (status IS NULL OR status != 'inactive') LIMIT 1").get(String(gameTitle))
+    ) as { id: number; title: string; category: string } | undefined;
+
+    const canonicalGameId = matchedGame ? matchedGame.id : (gameId ? Number(gameId) : null);
+    const canonicalGameTitle = matchedGame ? matchedGame.title : String(gameTitle).trim();
+    const canonicalGameCategory = matchedGame ? matchedGame.category : (gameCategory || 'Umum');
+
+    // Prevent automated headless browser bots or dummy test names from polluting real user access logs
+    if (
+      isDummyAccessLog({
+        gameId: canonicalGameId,
+        gameTitle: canonicalGameTitle,
+        userName,
+        userAgent: uaString,
+      })
+    ) {
+      res.json({
+        success: true,
+        logId: 0,
+        skippedDummy: true,
+        detected: { deviceType, deviceModel, browser, os, country, ipAddress },
+      });
+      return;
+    }
+
+    // Deduplicate rapid identical launches within 15 seconds (e.g. StrictMode / rapid double click)
+    const recentDuplicate = db
+      .prepare(`
+        SELECT id FROM game_access_logs
+        WHERE ip_address = ?
+          AND LOWER(TRIM(user_name)) = LOWER(TRIM(?))
+          AND LOWER(TRIM(game_title)) = LOWER(TRIM(?))
+          AND created_at >= datetime('now', '-15 seconds')
+        ORDER BY id DESC
+        LIMIT 1
+      `)
+      .get(ipAddress, userName, canonicalGameTitle) as { id: number } | undefined;
+
+    if (recentDuplicate) {
+      res.json({
+        success: true,
+        logId: recentDuplicate.id,
+        deduplicated: true,
+        detected: { deviceType, deviceModel, browser, os, country, ipAddress },
+      });
+      return;
+    }
 
     const info = db.prepare(`
       INSERT INTO game_access_logs (
@@ -1676,9 +1737,9 @@ app.post('/api/v1/analytics/game-access', (req: Request, res: Response) => {
         country, country_code, city, user_agent, duration_seconds, completed
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 0)
     `).run(
-      gameId || null,
-      gameTitle,
-      gameCategory || 'Umum',
+      canonicalGameId,
+      canonicalGameTitle,
+      canonicalGameCategory,
       userId,
       userName,
       userRole,
@@ -1694,15 +1755,15 @@ app.post('/api/v1/analytics/game-access', (req: Request, res: Response) => {
       uaString.slice(0, 255)
     );
 
-    // Increment player count in games table and notify connected clients
-    if (gameId) {
-      db.prepare('UPDATE games SET players = players + 1 WHERE id = ?').run(gameId);
+    // Increment player count in games table and notify connected clients in real time
+    if (canonicalGameId) {
+      db.prepare('UPDATE games SET players = players + 1 WHERE id = ?').run(canonicalGameId);
     }
-    broadcastEvent('stats:updated', { gameId: gameId || null, gameTitle });
+    broadcastEvent('stats:updated', { gameId: canonicalGameId, gameTitle: canonicalGameTitle, logId: Number(info.lastInsertRowid) });
 
     res.json({
       success: true,
-      logId: info.lastInsertRowid,
+      logId: Number(info.lastInsertRowid),
       detected: { deviceType, deviceModel, browser, os, country, ipAddress },
     });
   } catch (error) {
@@ -1714,16 +1775,22 @@ app.post('/api/v1/analytics/game-access', (req: Request, res: Response) => {
 app.post('/api/v1/analytics/game-heartbeat', (req: Request, res: Response) => {
   try {
     const { logId, durationSeconds, completed } = req.body;
+    if (logId === 0) {
+      res.json({ success: true });
+      return;
+    }
     if (!logId) {
       res.status(400).json({ success: false, message: 'logId wajib disertakan' });
       return;
     }
 
+    const safeDuration = Math.max(0, Math.round(Number(durationSeconds) || 0));
     if (completed) {
-      db.prepare('UPDATE game_access_logs SET duration_seconds = ?, completed = 1 WHERE id = ?').run(durationSeconds || 0, logId);
-      broadcastEvent('stats:updated', { logId, completed: true });
+      db.prepare('UPDATE game_access_logs SET duration_seconds = MAX(duration_seconds, ?), completed = 1 WHERE id = ?').run(safeDuration, logId);
+      broadcastEvent('stats:updated', { logId, durationSeconds: safeDuration, completed: true });
     } else {
-      db.prepare('UPDATE game_access_logs SET duration_seconds = ? WHERE id = ?').run(durationSeconds || 0, logId);
+      db.prepare('UPDATE game_access_logs SET duration_seconds = MAX(duration_seconds, ?) WHERE id = ?').run(safeDuration, logId);
+      broadcastEvent('stats:updated', { logId, durationSeconds: safeDuration, completed: false });
     }
 
     res.json({ success: true });
@@ -1877,6 +1944,26 @@ app.delete('/api/v1/analytics/logs', (req: Request, res: Response) => {
     recordAudit('Admin', 'CLEAR_ACCESS_LOGS', 'Membersihkan seluruh data log akses game pengguna');
     broadcastEvent('stats:updated', { logsCleared: true });
     res.json({ success: true, message: 'Seluruh riwayat log akses pengguna berhasil dibersihkan!' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: (error as Error).message });
+  }
+});
+
+// 6. Prune Dummy / Test Access & Audit Logs while Retaining & Syncing Real User Logs
+app.post('/api/v1/analytics/prune-dummy', (_req: Request, res: Response) => {
+  try {
+    const result = pruneDummyLogsAndSyncRealAccess();
+    recordAudit(
+      'Admin',
+      'PRUNE_DUMMY_LOGS',
+      `Membersihkan log dummy (${result.removedAccessLogs} akses, ${result.removedAuditLogs} audit) & mempertahankan ${result.retainedRealAccessLogs} log real`
+    );
+    broadcastEvent('stats:updated', { prunedDummy: true, ...result });
+    res.json({
+      success: true,
+      message: `Log dummy berhasil dibersihkan (${result.removedAccessLogs} log akses uji & ${result.removedAuditLogs} log audit uji dihapus). ${result.retainedRealAccessLogs} log akses pengguna real dipertahankan!`,
+      data: result,
+    });
   } catch (error) {
     res.status(500).json({ success: false, message: (error as Error).message });
   }
@@ -2337,6 +2424,9 @@ function executeNormalizedBackupImport(
         `).run(u.id, u.name, u.email, u.avatar, u.xp, u.badge, u.level, u.school, u.role, 'dharma123');
       }
     }
+
+    // 9. Clean dummy logs & synchronize real access logs from active game leaderboard sessions
+    pruneDummyLogsAndSyncRealAccess();
 
     db.exec('COMMIT');
   } catch (err) {
