@@ -10,363 +10,68 @@ import { fileURLToPath } from "node:url";
 import { DatabaseSync } from "node:sqlite";
 import fs from "node:fs";
 import path from "node:path";
-var resolvedCustomDb = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : null;
-var DATA_DIR = resolvedCustomDb ? path.dirname(resolvedCustomDb) : path.resolve(process.cwd(), "data");
-var BACKUP_DIR = path.join(DATA_DIR, "backups");
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-if (!fs.existsSync(BACKUP_DIR)) {
-  fs.mkdirSync(BACKUP_DIR, { recursive: true });
-}
-var DB_PATH = resolvedCustomDb || path.join(DATA_DIR, "portal_game.db");
-var db = new DatabaseSync(DB_PATH);
-db.exec("PRAGMA journal_mode = WAL;");
-db.exec("PRAGMA synchronous = NORMAL;");
-db.exec("PRAGMA busy_timeout = 5000;");
-db.exec("PRAGMA foreign_keys = ON;");
-db.exec(`
-  CREATE TABLE IF NOT EXISTS sync_metadata (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  );
 
-  CREATE TABLE IF NOT EXISTS site_settings (
-    key TEXT PRIMARY KEY,
-    value TEXT NOT NULL,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS categories (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
-    slug TEXT NOT NULL,
-    icon TEXT NOT NULL,
-    sort_order INTEGER DEFAULT 0,
-    status INTEGER DEFAULT 1,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS games (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    title TEXT NOT NULL,
-    slug TEXT NOT NULL,
-    category TEXT NOT NULL,
-    difficulty TEXT DEFAULT 'Mudah',
-    type TEXT DEFAULT 'quiz',
-    rating REAL DEFAULT 4.9,
-    players INTEGER DEFAULT 0,
-    thumbnail TEXT,
-    icon TEXT,
-    description TEXT,
-    is_premium INTEGER DEFAULT 0,
-    is_active INTEGER DEFAULT 1,
-    html5_code TEXT,
-    url TEXT,
-    status TEXT DEFAULT 'published',
-    featured INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS leaderboard (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    user_name TEXT NOT NULL,
-    user_email TEXT,
-    avatar TEXT,
-    game_id INTEGER,
-    game_title TEXT NOT NULL,
-    score INTEGER NOT NULL,
-    xp_earned INTEGER NOT NULL,
-    badge TEXT NOT NULL,
-    school TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    name TEXT NOT NULL,
-    email TEXT UNIQUE NOT NULL,
-    avatar TEXT,
-    xp INTEGER DEFAULT 100,
-    badge TEXT DEFAULT 'Sahabat Pemula Dharma',
-    level INTEGER DEFAULT 1,
-    school TEXT,
-    role TEXT DEFAULT 'user',
-    password TEXT DEFAULT 'dharma123',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS testimonials (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT NOT NULL,
-    role TEXT NOT NULL,
-    game TEXT NOT NULL,
-    rating INTEGER DEFAULT 5,
-    message TEXT NOT NULL,
-    status TEXT DEFAULT 'pending',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS licenses (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    school_name TEXT NOT NULL,
-    plan TEXT NOT NULL,
-    status TEXT DEFAULT 'Aktif',
-    expires_date TEXT NOT NULL,
-    license_key TEXT UNIQUE NOT NULL,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS certificates (
-    id TEXT PRIMARY KEY,
-    student_name TEXT NOT NULL,
-    module TEXT NOT NULL,
-    institution TEXT NOT NULL,
-    date TEXT NOT NULL,
-    certificate_number TEXT NOT NULL,
-    verification_code TEXT UNIQUE NOT NULL,
-    is_active INTEGER DEFAULT 1,
-    status TEXT DEFAULT 'active',
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS audit_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    actor TEXT NOT NULL,
-    action TEXT NOT NULL,
-    details TEXT,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE TABLE IF NOT EXISTS game_access_logs (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    game_id INTEGER,
-    game_title TEXT NOT NULL,
-    game_category TEXT,
-    user_id TEXT,
-    user_name TEXT NOT NULL,
-    user_role TEXT DEFAULT 'tamu',
-    ip_address TEXT,
-    device_type TEXT,
-    device_model TEXT,
-    browser TEXT,
-    os TEXT,
-    screen_resolution TEXT,
-    country TEXT DEFAULT 'Indonesia',
-    country_code TEXT DEFAULT 'ID',
-    city TEXT,
-    user_agent TEXT,
-    duration_seconds INTEGER DEFAULT 0,
-    completed INTEGER DEFAULT 0,
-    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-  );
-
-  CREATE INDEX IF NOT EXISTS idx_games_category ON games(category);
-  CREATE INDEX IF NOT EXISTS idx_leaderboard_score ON leaderboard(score DESC);
-  CREATE INDEX IF NOT EXISTS idx_testimonials_status ON testimonials(status);
-  CREATE INDEX IF NOT EXISTS idx_access_logs_created ON game_access_logs(created_at DESC);
-  CREATE INDEX IF NOT EXISTS idx_access_logs_game ON game_access_logs(game_id);
-  CREATE INDEX IF NOT EXISTS idx_access_logs_device ON game_access_logs(device_type);
-`);
-try {
-  db.exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user';");
-} catch {
-}
-try {
-  db.exec("ALTER TABLE users ADD COLUMN password TEXT DEFAULT 'dharma123';");
-} catch {
-}
-try {
-  db.exec("ALTER TABLE games ADD COLUMN is_active INTEGER DEFAULT 1;");
-} catch {
-}
-try {
-  db.exec("ALTER TABLE games ADD COLUMN icon TEXT DEFAULT '';");
-} catch {
-}
-try {
-  db.exec("ALTER TABLE certificates ADD COLUMN is_active INTEGER DEFAULT 1;");
-} catch {
-}
-try {
-  db.exec("ALTER TABLE certificates ADD COLUMN status TEXT DEFAULT 'active';");
-} catch {
-}
-function seedDatabase() {
-  const lbCount = db.prepare("SELECT COUNT(*) as count FROM leaderboard").get().count;
-  if (lbCount === 0) {
-    const insertLB = db.prepare(`
-      INSERT INTO leaderboard (user_name, user_email, avatar, game_title, score, xp_earned, badge, school)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    insertLB.run("Ananda Metta Putra", "ananda.m@dharmasurya.sch.id", "https://api.dicebear.com/7.x/bottts/svg?seed=Ananda", "Kuis Perjalanan Siddhartha", 980, 490, "Maha Pandita Dharma", "SMP Maitreyawira Jakarta");
-    insertLB.run("Saddhavati Dewi", "dewi.s@vihara.org", "https://api.dicebear.com/7.x/bottts/svg?seed=Saddhavati", "Memory Candi Borobudur", 950, 475, "Penjaga Bodhicitta", "Vihara Mendut Magelang");
-    insertLB.run("Bodhi Tanujaya", "bodhi.t@bodhisatta.sch.id", "https://api.dicebear.com/7.x/bottts/svg?seed=Bodhi", "Refleks Teratai Suci (HTML5)", 910, 455, "Penyelaras Sila & Samadhi", "SMA Bodhisatta Tangerang");
-    insertLB.run("Kalyana Mitta", "kalyana@buddhis.id", "https://api.dicebear.com/7.x/bottts/svg?seed=Kalyana", "Misteri Empat Kebenaran Mulia", 860, 430, "Penyelaras Sila & Samadhi", "SMP Tri Ratna Jakarta");
-    insertLB.run("Dhammasena Wijaya", "wijaya.d@vihara.id", "https://api.dicebear.com/7.x/bottts/svg?seed=Dhammasena", "Pancasila Buddhis & Etika Harian", 820, 410, "Penjelajah Sutta & Tripitaka", "Sekolah Cinta Kasih Tzu Chi");
+// src/utils/baselineProtection.ts
+function shouldRunInitialSeed(initialSeedCompleted, counts) {
+  if (initialSeedCompleted || counts.users > 0) {
+    return {
+      seedTestimonials: false,
+      seedLicenses: false,
+      seedCertificates: false,
+      seedUsers: counts.users === 0,
+      seedSettings: counts.siteSettings === 0
+    };
   }
-  const testiCount = db.prepare("SELECT COUNT(*) as count FROM testimonials").get().count;
-  if (testiCount === 0) {
-    const insertTesti = db.prepare(`
-      INSERT INTO testimonials (name, role, game, rating, message, status)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `);
-    insertTesti.run(
-      "Bhikkhu Dhammacaro",
-      "Guru Agama Buddha / Pengurus Vihara",
-      "Platform Keseluruhan",
-      5,
-      "Platform ini sangat luar biasa! Dukungan game portable dan database terpusat memudahkan penambahan materi pembelajaran baru untuk kelas Minggu.",
-      "approved"
-    );
-    insertTesti.run(
-      "Dewi Lestari, S.Ag.",
-      "Guru Agama Buddha SMP",
-      "Kuis Perjalanan Siddhartha",
-      5,
-      "Peserta didik sangat antusias berebut posisi di Papan Peringkat Real-time. Materi yang disajikan akurat dan sesuai silabus kurikulum nasional.",
-      "approved"
-    );
-    insertTesti.run(
-      "Sujana Dharmawira, M.Pd.",
-      "Kepala Sekolah Buddhis",
-      "Memory Candi Borobudur",
-      5,
-      "Integrasi visual candi dan sertifikat digital yang dapat diverifikasi kode resminya membuat pembelajaran agama menjadi modern dan bermakna.",
-      "approved"
-    );
+  return {
+    seedTestimonials: counts.testimonials === 0,
+    seedLicenses: counts.licenses === 0,
+    seedCertificates: counts.certificates === 0,
+    seedUsers: counts.users === 0,
+    seedSettings: counts.siteSettings === 0
+  };
+}
+function mergeExistingAndImportedSettings(existing, imported, mode) {
+  if (mode === "replace") {
+    return { ...imported };
   }
-  const licCount = db.prepare("SELECT COUNT(*) as count FROM licenses").get().count;
-  if (licCount === 0) {
-    const insertLic = db.prepare(`
-      INSERT INTO licenses (school_name, plan, status, expires_date, license_key)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    insertLic.run("SMP Maitreyawira Jakarta", "Pro School License (Unlimited)", "Aktif", "2027-12-31", "PGB-LIC-MTW-2027");
-    insertLic.run("Vihara Mendut Magelang", "Vihara Learning Pack", "Aktif", "2028-06-30", "PGB-LIC-MND-2028");
-    insertLic.run("SMA Bodhisatta Tangerang", "Pro Institutional Suite", "Aktif", "2027-10-15", "PGB-LIC-BDS-2027");
-  }
-  const certCount = db.prepare("SELECT COUNT(*) as count FROM certificates").get().count;
-  if (certCount === 0) {
-    const insertCert = db.prepare(`
-      INSERT INTO certificates (id, student_name, module, institution, date, certificate_number, verification_code)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-    insertCert.run(
-      "CERT-2026-001",
-      "Ananda Budi Santoso",
-      "Dasar-Dasar Tripitaka & Sejarah Buddhis",
-      "Vihara Buddhayana",
-      "2026-03-15",
-      "PGB/DHARMA/2026/001",
-      "CERT-2026-001"
-    );
-    insertCert.run(
-      "CERT-2026-002",
-      "Saddhavati Dewi Lestari",
-      "Penerapan Pancasila Buddhis dalam Kehidupan",
-      "SMP Maitreyawira",
-      "2026-04-10",
-      "PGB/DHARMA/2026/002",
-      "CERT-2026-002"
-    );
-  }
-  const userCount = db.prepare("SELECT COUNT(*) as count FROM users").get().count;
-  if (userCount === 0) {
-    const insertUser = db.prepare(`
-      INSERT INTO users (id, name, email, avatar, xp, badge, level, school, role, password)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    insertUser.run(
-      "usr-admin",
-      "Bhadra Dharmasurya (Super Admin)",
-      "admin@dharmasurya.sch.id",
-      "https://api.dicebear.com/7.x/bottts/svg?seed=AdminDharma",
-      2500,
-      "Maha Pandita Dharma",
-      10,
-      "Pusat Kendali Pengelola Dharma",
-      "admin",
-      "admin321"
-    );
-    insertUser.run(
-      "usr-uploader",
-      "Upasaka Studio (Uploader Game)",
-      "uploader@dharmasurya.sch.id",
-      "https://api.dicebear.com/7.x/bottts/svg?seed=UploaderGame",
-      950,
-      "Penyelaras Sila & Samadhi",
-      5,
-      "Studio Media Pembelajaran Dharma",
-      "uploader",
-      "uploader123"
-    );
-    insertUser.run(
-      "usr-1",
-      "Ananda Metta Putra",
-      "ananda.m@dharmasurya.sch.id",
-      "https://api.dicebear.com/7.x/bottts/svg?seed=Ananda",
-      980,
-      "Maha Pandita Dharma",
-      5,
-      "SMP Maitreyawira Jakarta",
-      "user",
-      "dharma123"
-    );
-    insertUser.run(
-      "usr-2",
-      "Saddhavati Dewi",
-      "dewi.s@vihara.org",
-      "https://api.dicebear.com/7.x/bottts/svg?seed=Saddhavati",
-      950,
-      "Penjaga Bodhicitta",
-      4,
-      "Vihara Mendut Magelang",
-      "user",
-      "dharma123"
-    );
-  } else {
-    const adminExists = db.prepare("SELECT id FROM users WHERE role = 'admin' OR email = 'admin@dharmasurya.sch.id'").get();
-    if (!adminExists) {
-      db.prepare(`
-        INSERT INTO users (id, name, email, avatar, xp, badge, level, school, role, password)
-        VALUES ('usr-admin', 'Bhadra Dharmasurya (Super Admin)', 'admin@dharmasurya.sch.id', 'https://api.dicebear.com/7.x/bottts/svg?seed=AdminDharma', 2500, 'Maha Pandita Dharma', 10, 'Pusat Kendali Pengelola Dharma', 'admin', 'admin321')
-      `).run();
+  const keys = ["title", "subtitle", "emoji", "imageUrl", "announcement"];
+  const merged = { ...existing };
+  for (const key of keys) {
+    const incomingVal = imported[key];
+    const currentVal = existing[key];
+    if (incomingVal !== void 0) {
+      const trimmedIncoming = String(incomingVal).trim();
+      const trimmedCurrent = currentVal !== void 0 ? String(currentVal).trim() : "";
+      if (trimmedIncoming.length > 0 || trimmedCurrent.length === 0) {
+        merged[key] = String(incomingVal);
+      }
     }
-    const uploaderExists = db.prepare("SELECT id FROM users WHERE role = 'uploader' OR email = 'uploader@dharmasurya.sch.id'").get();
-    if (!uploaderExists) {
-      db.prepare(`
-        INSERT INTO users (id, name, email, avatar, xp, badge, level, school, role, password)
-        VALUES ('usr-uploader', 'Upasaka Studio (Uploader Game)', 'uploader@dharmasurya.sch.id', 'https://api.dicebear.com/7.x/bottts/svg?seed=UploaderGame', 950, 'Penyelaras Sila & Samadhi', 5, 'Studio Media Pembelajaran Dharma', 'uploader', 'uploader123')
-      `).run();
-    }
-    db.prepare("UPDATE users SET role = 'user' WHERE role IS NULL OR role = ''").run();
-    db.prepare("UPDATE users SET password = 'admin321' WHERE role = 'admin' AND (password IS NULL OR password = '')").run();
-    db.prepare("UPDATE users SET password = 'uploader123' WHERE role = 'uploader' AND (password IS NULL OR password = '')").run();
-    db.prepare("UPDATE users SET password = 'dharma123' WHERE password IS NULL OR password = ''").run();
-    db.prepare("UPDATE site_settings SET value = '' WHERE key = 'emoji'").run();
   }
-  const settingsCount = db.prepare("SELECT COUNT(*) as count FROM site_settings").get().count;
-  if (settingsCount === 0) {
-    const insertSetting = db.prepare(`INSERT INTO site_settings (key, value) VALUES (?, ?)`);
-    insertSetting.run("title", "Candi & Stupa Dharma");
-    insertSetting.run("subtitle", "Nilai Kebijaksanaan & Kemurnian");
-    insertSetting.run("emoji", "");
-    insertSetting.run("imageUrl", "");
-    insertSetting.run("announcement", "Selamat datang di Pusat Games Buddhis - Media Pembelajaran Dharma Interaktif Berbasis SQL Terpusat!");
-  }
-  const revExists = db.prepare("SELECT value FROM sync_metadata WHERE key = 'data_revision'").get();
-  if (!revExists) {
-    db.prepare("INSERT INTO sync_metadata (key, value) VALUES ('data_revision', '1')").run();
-  }
+  return merged;
 }
-seedDatabase();
+function selectAutoBaselineSnapshotsToDelete(filenames, maxKeep = 5) {
+  const autoFiles = filenames.filter((name) => /^auto-baseline_.*\.db$/i.test(name)).slice().sort((a, b) => a < b ? 1 : a > b ? -1 : 0);
+  if (autoFiles.length <= Math.max(1, maxKeep)) {
+    return [];
+  }
+  return autoFiles.slice(Math.max(1, maxKeep));
+}
+function validatePublishedSyncUrl(rawUrl) {
+  const trimmed = String(rawUrl || "").trim().replace(/\/+$/, "");
+  if (!trimmed) {
+    throw new Error("URL website terpublish wajib diisi.");
+  }
+  let parsed;
+  try {
+    parsed = new URL(trimmed);
+  } catch {
+    throw new Error("Format URL website tidak valid. Contoh: https://nama-app.run.app");
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") {
+    throw new Error("URL harus menggunakan protokol https:// atau http://");
+  }
+  return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, "");
+}
 
 // src/utils/categorySync.ts
 function normalizeCategoryName(name) {
@@ -672,6 +377,827 @@ function isValidSqliteHeader(bytes) {
 function formatSnapshotTimestamp(date = /* @__PURE__ */ new Date()) {
   return date.toISOString().replace(/[:.]/g, "-");
 }
+
+// src/server/db.ts
+var resolvedCustomDb = process.env.DB_PATH ? path.resolve(process.env.DB_PATH) : null;
+var DATA_DIR = resolvedCustomDb ? path.dirname(resolvedCustomDb) : path.resolve(process.cwd(), "data");
+var BACKUP_DIR = path.join(DATA_DIR, "backups");
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+if (!fs.existsSync(BACKUP_DIR)) {
+  fs.mkdirSync(BACKUP_DIR, { recursive: true });
+}
+var DB_PATH = resolvedCustomDb || path.join(DATA_DIR, "portal_game.db");
+function repairDatabaseFileIfNeeded(dbPath) {
+  if (!fs.existsSync(dbPath)) return;
+  let sourceDbPath = dbPath;
+  let needsRebuild = false;
+  const inspectDbCandidate = (candidatePath) => {
+    const conn = new DatabaseSync(candidatePath);
+    try {
+      try {
+        conn.exec("PRAGMA wal_checkpoint(PASSIVE);");
+      } catch {
+      }
+      let integrityOk = false;
+      try {
+        const res = conn.prepare("PRAGMA integrity_check").all();
+        integrityOk = Boolean(res.length && res[0]?.integrity_check === "ok");
+      } catch {
+        integrityOk = false;
+      }
+      const gamesCount = Number(conn.prepare("SELECT COUNT(*) as c FROM games").get()?.c || 0);
+      const usersCount = Number(conn.prepare("SELECT COUNT(*) as c FROM users").get()?.c || 0);
+      const maxAuditId = Number(conn.prepare("SELECT MAX(id) as m FROM audit_logs").get()?.m || 0);
+      return { integrityOk, gamesCount, usersCount, maxAuditId };
+    } catch {
+      return { integrityOk: false, gamesCount: 0, usersCount: 0, maxAuditId: 0 };
+    } finally {
+      try {
+        conn.close();
+      } catch {
+      }
+    }
+  };
+  const mainStats = inspectDbCandidate(dbPath);
+  if (!mainStats.integrityOk) {
+    needsRebuild = true;
+  }
+  if (mainStats.gamesCount === 0 && fs.existsSync(BACKUP_DIR)) {
+    const snapshotFiles = fs.readdirSync(BACKUP_DIR).filter((f) => f.endsWith(".db") && (f.startsWith("portal_game_backup_") || f.startsWith("auto-baseline_") || f.startsWith("pre-merge_"))).map((f) => ({
+      name: f,
+      fullPath: path.join(BACKUP_DIR, f),
+      mtimeMs: fs.statSync(path.join(BACKUP_DIR, f)).mtimeMs,
+      size: fs.statSync(path.join(BACKUP_DIR, f)).size
+    })).filter((f) => f.size > 0).sort((a, b) => b.mtimeMs - a.mtimeMs);
+    for (const snap of snapshotFiles) {
+      const snapStats = inspectDbCandidate(snap.fullPath);
+      if (snapStats.gamesCount > mainStats.gamesCount && snapStats.maxAuditId >= mainStats.maxAuditId) {
+        sourceDbPath = snap.fullPath;
+        needsRebuild = true;
+        break;
+      }
+    }
+  }
+  if (!needsRebuild) return;
+  const tempPath = `${dbPath}.repaired_${Date.now()}.db`;
+  const oldDb = new DatabaseSync(sourceDbPath, { readOnly: true });
+  const newDb = new DatabaseSync(tempPath);
+  try {
+    newDb.exec(`
+      CREATE TABLE IF NOT EXISTS sync_metadata (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS site_settings (
+        key TEXT PRIMARY KEY,
+        value TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS categories (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT UNIQUE NOT NULL,
+        slug TEXT NOT NULL,
+        icon TEXT NOT NULL,
+        sort_order INTEGER DEFAULT 0,
+        status INTEGER DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS games (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        title TEXT NOT NULL,
+        slug TEXT NOT NULL,
+        category TEXT NOT NULL,
+        difficulty TEXT DEFAULT 'Mudah',
+        type TEXT DEFAULT 'quiz',
+        rating REAL DEFAULT 4.9,
+        players INTEGER DEFAULT 0,
+        thumbnail TEXT,
+        icon TEXT,
+        description TEXT,
+        is_premium INTEGER DEFAULT 0,
+        is_active INTEGER DEFAULT 1,
+        html5_code TEXT,
+        url TEXT,
+        status TEXT DEFAULT 'published',
+        featured INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS leaderboard (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_name TEXT NOT NULL,
+        user_email TEXT,
+        avatar TEXT,
+        game_id INTEGER,
+        game_title TEXT NOT NULL,
+        score INTEGER NOT NULL,
+        xp_earned INTEGER NOT NULL,
+        badge TEXT NOT NULL,
+        school TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        email TEXT UNIQUE NOT NULL,
+        avatar TEXT,
+        xp INTEGER DEFAULT 100,
+        badge TEXT DEFAULT 'Sahabat Pemula Dharma',
+        level INTEGER DEFAULT 1,
+        school TEXT,
+        role TEXT DEFAULT 'user',
+        password TEXT DEFAULT 'dharma123',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS testimonials (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        role TEXT NOT NULL,
+        game TEXT NOT NULL,
+        rating INTEGER DEFAULT 5,
+        message TEXT NOT NULL,
+        status TEXT DEFAULT 'pending',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS licenses (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        school_name TEXT NOT NULL,
+        plan TEXT NOT NULL,
+        status TEXT DEFAULT 'Aktif',
+        expires_date TEXT NOT NULL,
+        license_key TEXT UNIQUE NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS certificates (
+        id TEXT PRIMARY KEY,
+        student_name TEXT NOT NULL,
+        module TEXT NOT NULL,
+        institution TEXT NOT NULL,
+        date TEXT NOT NULL,
+        certificate_number TEXT NOT NULL,
+        verification_code TEXT UNIQUE NOT NULL,
+        is_active INTEGER DEFAULT 1,
+        status TEXT DEFAULT 'active',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS audit_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        actor TEXT NOT NULL,
+        action TEXT NOT NULL,
+        details TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+      CREATE TABLE IF NOT EXISTS game_access_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        game_id INTEGER,
+        game_title TEXT NOT NULL,
+        game_category TEXT,
+        user_id TEXT,
+        user_name TEXT NOT NULL,
+        user_role TEXT DEFAULT 'tamu',
+        ip_address TEXT,
+        device_type TEXT,
+        device_model TEXT,
+        browser TEXT,
+        os TEXT,
+        screen_resolution TEXT,
+        country TEXT DEFAULT 'Indonesia',
+        country_code TEXT DEFAULT 'ID',
+        city TEXT,
+        user_agent TEXT,
+        duration_seconds INTEGER DEFAULT 0,
+        completed INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+    const copyTableRows = (table) => {
+      try {
+        const rows = oldDb.prepare(`SELECT * FROM ${table}`).all();
+        if (!rows.length) return;
+        const cols = Object.keys(rows[0]);
+        const placeholders = cols.map(() => "?").join(", ");
+        const stmt = newDb.prepare(`INSERT OR IGNORE INTO ${table} (${cols.join(", ")}) VALUES (${placeholders})`);
+        for (const r of rows) {
+          stmt.run(...cols.map((c) => r[c]));
+        }
+      } catch {
+        try {
+          const maxRow = oldDb.prepare(`SELECT MAX(id) as m FROM ${table}`).get();
+          const maxId = Math.min(Number(maxRow?.m || 2e3), 2e4);
+          const getById = oldDb.prepare(`SELECT * FROM ${table} WHERE id = ?`);
+          let stmt = null;
+          let cols = [];
+          for (let id = 1; id <= maxId; id++) {
+            try {
+              const r = getById.get(id);
+              if (!r) continue;
+              if (!stmt) {
+                cols = Object.keys(r);
+                const placeholders = cols.map(() => "?").join(", ");
+                stmt = newDb.prepare(`INSERT OR IGNORE INTO ${table} (${cols.join(", ")}) VALUES (${placeholders})`);
+              }
+              stmt.run(...cols.map((c) => r[c]));
+            } catch {
+            }
+          }
+        } catch {
+        }
+      }
+    };
+    newDb.exec("BEGIN IMMEDIATE");
+    for (const t of [
+      "sync_metadata",
+      "site_settings",
+      "categories",
+      "games",
+      "leaderboard",
+      "users",
+      "testimonials",
+      "licenses",
+      "certificates",
+      "audit_logs",
+      "game_access_logs"
+    ]) {
+      copyTableRows(t);
+    }
+    newDb.exec("COMMIT");
+    oldDb.close();
+    newDb.close();
+    for (const suffix of ["", "-wal", "-shm"]) {
+      try {
+        if (fs.existsSync(`${dbPath}${suffix}`)) {
+          fs.unlinkSync(`${dbPath}${suffix}`);
+        }
+      } catch {
+      }
+    }
+    fs.renameSync(tempPath, dbPath);
+  } catch (err) {
+    console.warn("Database file repair skipped:", err.message);
+    try {
+      oldDb.close();
+    } catch {
+    }
+    try {
+      newDb.close();
+    } catch {
+    }
+    try {
+      if (fs.existsSync(tempPath)) fs.unlinkSync(tempPath);
+    } catch {
+    }
+  }
+}
+repairDatabaseFileIfNeeded(DB_PATH);
+var db = new DatabaseSync(DB_PATH);
+db.exec("PRAGMA journal_mode = WAL;");
+db.exec("PRAGMA synchronous = NORMAL;");
+db.exec("PRAGMA busy_timeout = 5000;");
+db.exec("PRAGMA foreign_keys = ON;");
+db.exec(`
+  CREATE TABLE IF NOT EXISTS sync_metadata (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS site_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS categories (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    slug TEXT NOT NULL,
+    icon TEXT NOT NULL,
+    sort_order INTEGER DEFAULT 0,
+    status INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS games (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    slug TEXT NOT NULL,
+    category TEXT NOT NULL,
+    difficulty TEXT DEFAULT 'Mudah',
+    type TEXT DEFAULT 'quiz',
+    rating REAL DEFAULT 4.9,
+    players INTEGER DEFAULT 0,
+    thumbnail TEXT,
+    icon TEXT,
+    description TEXT,
+    is_premium INTEGER DEFAULT 0,
+    is_active INTEGER DEFAULT 1,
+    html5_code TEXT,
+    url TEXT,
+    status TEXT DEFAULT 'published',
+    featured INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS leaderboard (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_name TEXT NOT NULL,
+    user_email TEXT,
+    avatar TEXT,
+    game_id INTEGER,
+    game_title TEXT NOT NULL,
+    score INTEGER NOT NULL,
+    xp_earned INTEGER NOT NULL,
+    badge TEXT NOT NULL,
+    school TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS users (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    email TEXT UNIQUE NOT NULL,
+    avatar TEXT,
+    xp INTEGER DEFAULT 100,
+    badge TEXT DEFAULT 'Sahabat Pemula Dharma',
+    level INTEGER DEFAULT 1,
+    school TEXT,
+    role TEXT DEFAULT 'user',
+    password TEXT DEFAULT 'dharma123',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS testimonials (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL,
+    game TEXT NOT NULL,
+    rating INTEGER DEFAULT 5,
+    message TEXT NOT NULL,
+    status TEXT DEFAULT 'pending',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS licenses (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    school_name TEXT NOT NULL,
+    plan TEXT NOT NULL,
+    status TEXT DEFAULT 'Aktif',
+    expires_date TEXT NOT NULL,
+    license_key TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS certificates (
+    id TEXT PRIMARY KEY,
+    student_name TEXT NOT NULL,
+    module TEXT NOT NULL,
+    institution TEXT NOT NULL,
+    date TEXT NOT NULL,
+    certificate_number TEXT NOT NULL,
+    verification_code TEXT UNIQUE NOT NULL,
+    is_active INTEGER DEFAULT 1,
+    status TEXT DEFAULT 'active',
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS audit_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    actor TEXT NOT NULL,
+    action TEXT NOT NULL,
+    details TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE TABLE IF NOT EXISTS game_access_logs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    game_id INTEGER,
+    game_title TEXT NOT NULL,
+    game_category TEXT,
+    user_id TEXT,
+    user_name TEXT NOT NULL,
+    user_role TEXT DEFAULT 'tamu',
+    ip_address TEXT,
+    device_type TEXT,
+    device_model TEXT,
+    browser TEXT,
+    os TEXT,
+    screen_resolution TEXT,
+    country TEXT DEFAULT 'Indonesia',
+    country_code TEXT DEFAULT 'ID',
+    city TEXT,
+    user_agent TEXT,
+    duration_seconds INTEGER DEFAULT 0,
+    completed INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_games_category ON games(category);
+  CREATE INDEX IF NOT EXISTS idx_leaderboard_score ON leaderboard(score DESC);
+  CREATE INDEX IF NOT EXISTS idx_testimonials_status ON testimonials(status);
+  CREATE INDEX IF NOT EXISTS idx_access_logs_created ON game_access_logs(created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_access_logs_game ON game_access_logs(game_id);
+  CREATE INDEX IF NOT EXISTS idx_access_logs_device ON game_access_logs(device_type);
+`);
+try {
+  db.exec("ALTER TABLE users ADD COLUMN role TEXT DEFAULT 'user';");
+} catch {
+}
+try {
+  db.exec("ALTER TABLE users ADD COLUMN password TEXT DEFAULT 'dharma123';");
+} catch {
+}
+try {
+  db.exec("ALTER TABLE games ADD COLUMN is_active INTEGER DEFAULT 1;");
+} catch {
+}
+try {
+  db.exec("ALTER TABLE games ADD COLUMN icon TEXT DEFAULT '';");
+} catch {
+}
+try {
+  db.exec("ALTER TABLE certificates ADD COLUMN is_active INTEGER DEFAULT 1;");
+} catch {
+}
+try {
+  db.exec("ALTER TABLE certificates ADD COLUMN status TEXT DEFAULT 'active';");
+} catch {
+}
+function pruneInactiveLeaderboardScores() {
+  const result = db.prepare(`
+    DELETE FROM leaderboard
+    WHERE NOT EXISTS (
+      SELECT 1 FROM games g
+      WHERE g.is_active = 1
+        AND (g.status IS NULL OR g.status != 'inactive')
+        AND (
+          (leaderboard.game_id IS NOT NULL AND leaderboard.game_id = g.id)
+          OR LOWER(TRIM(leaderboard.game_title)) = LOWER(TRIM(g.title))
+        )
+    )
+  `).run();
+  return Number(result.changes || 0);
+}
+function healMalformedAccessLogsIfNeeded() {
+  try {
+    db.prepare("SELECT COUNT(DISTINCT ip_address) as c FROM game_access_logs").get();
+    return false;
+  } catch (err) {
+    if (!String(err.message || "").includes("malformed")) {
+      return false;
+    }
+    try {
+      const maxRow = db.prepare("SELECT MAX(id) as maxId FROM game_access_logs").get();
+      const maxId = Math.min(Number(maxRow?.maxId || 2e3), 1e4);
+      const validRows = [];
+      const selectById = db.prepare("SELECT * FROM game_access_logs WHERE id = ?");
+      for (let id = 1; id <= maxId; id++) {
+        try {
+          const row = selectById.get(id);
+          if (row) validRows.push(row);
+        } catch {
+        }
+      }
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        db.exec("DROP INDEX IF EXISTS idx_access_logs_created;");
+        db.exec("DROP INDEX IF EXISTS idx_access_logs_game;");
+        db.exec("DROP INDEX IF EXISTS idx_access_logs_device;");
+        db.exec("DROP TABLE IF EXISTS game_access_logs;");
+        db.exec(`
+          CREATE TABLE game_access_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            game_id INTEGER,
+            game_title TEXT NOT NULL,
+            game_category TEXT,
+            user_id TEXT,
+            user_name TEXT NOT NULL,
+            user_role TEXT DEFAULT 'tamu',
+            ip_address TEXT,
+            device_type TEXT,
+            device_model TEXT,
+            browser TEXT,
+            os TEXT,
+            screen_resolution TEXT,
+            country TEXT DEFAULT 'Indonesia',
+            country_code TEXT DEFAULT 'ID',
+            city TEXT,
+            user_agent TEXT,
+            duration_seconds INTEGER DEFAULT 0,
+            completed INTEGER DEFAULT 0,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );
+          CREATE INDEX idx_access_logs_created ON game_access_logs(created_at DESC);
+          CREATE INDEX idx_access_logs_game ON game_access_logs(game_id);
+          CREATE INDEX idx_access_logs_device ON game_access_logs(device_type);
+        `);
+        const insertStmt = db.prepare(`
+          INSERT INTO game_access_logs (
+            id, game_id, game_title, game_category, user_id, user_name, user_role,
+            ip_address, device_type, device_model, browser, os, screen_resolution,
+            country, country_code, city, user_agent, duration_seconds, completed, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+        for (const r of validRows) {
+          insertStmt.run(
+            r.id,
+            r.game_id ?? null,
+            String(r.game_title || "Permainan Dharma"),
+            r.game_category ?? "Umum",
+            r.user_id ?? null,
+            String(r.user_name || "Tamu"),
+            String(r.user_role || "tamu"),
+            r.ip_address ?? "127.0.0.1",
+            r.device_type ?? "Desktop PC",
+            r.device_model ?? "",
+            r.browser ?? "Browser Web",
+            r.os ?? "OS",
+            r.screen_resolution ?? null,
+            String(r.country || "Indonesia"),
+            String(r.country_code || "ID"),
+            r.city ?? "Nusantara",
+            r.user_agent ?? "",
+            Number(r.duration_seconds || 0),
+            Number(r.completed ? 1 : 0),
+            String(r.created_at || (/* @__PURE__ */ new Date()).toISOString())
+          );
+        }
+        db.exec("COMMIT");
+        try {
+          db.exec("VACUUM;");
+        } catch {
+        }
+        return true;
+      } catch (txErr) {
+        try {
+          db.exec("ROLLBACK");
+        } catch {
+        }
+        console.warn("Self-heal rollback:", txErr.message);
+        return false;
+      }
+    } catch (outerErr) {
+      console.warn("Self-heal skipped:", outerErr.message);
+      return false;
+    }
+  }
+}
+function getBaselineDatabaseCounts() {
+  return {
+    games: Number(db.prepare("SELECT COUNT(*) as count FROM games").get().count || 0),
+    categories: Number(db.prepare("SELECT COUNT(*) as count FROM categories").get().count || 0),
+    leaderboard: Number(db.prepare("SELECT COUNT(*) as count FROM leaderboard").get().count || 0),
+    users: Number(db.prepare("SELECT COUNT(*) as count FROM users").get().count || 0),
+    certificates: Number(db.prepare("SELECT COUNT(*) as count FROM certificates").get().count || 0),
+    testimonials: Number(db.prepare("SELECT COUNT(*) as count FROM testimonials").get().count || 0),
+    licenses: Number(db.prepare("SELECT COUNT(*) as count FROM licenses").get().count || 0),
+    accessLogs: Number(db.prepare("SELECT COUNT(*) as count FROM game_access_logs").get().count || 0)
+  };
+}
+function ensureAutoBaselineSnapshotOnStartup() {
+  try {
+    const counts = getBaselineDatabaseCounts();
+    const hasRecordedData = counts.games > 0 || counts.categories > 0 || counts.leaderboard > 0 || counts.certificates > 0 || counts.testimonials > 0 || counts.accessLogs > 0 || counts.users > 4;
+    if (!hasRecordedData) {
+      return null;
+    }
+    const existingFiles = fs.existsSync(BACKUP_DIR) ? fs.readdirSync(BACKUP_DIR).filter((f) => /^auto-baseline_.*\.db$/i.test(f)) : [];
+    const ONE_HOUR_MS = 60 * 60 * 1e3;
+    const now = Date.now();
+    for (const file of existingFiles) {
+      const full = path.join(BACKUP_DIR, file);
+      const stat = fs.statSync(full);
+      if (stat.size <= 0) {
+        try {
+          fs.unlinkSync(full);
+        } catch {
+        }
+        continue;
+      }
+      if (now - stat.mtimeMs < ONE_HOUR_MS) {
+        return file;
+      }
+    }
+    const filename = `auto-baseline_${formatSnapshotTimestamp()}.db`;
+    const destPath = path.join(BACKUP_DIR, filename);
+    const escapedPath = destPath.replace(/'/g, "''");
+    try {
+      db.exec(`VACUUM INTO '${escapedPath}'`);
+    } catch {
+      try {
+        if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+      } catch {
+      }
+      try {
+        db.exec("REINDEX;");
+        db.exec(`VACUUM INTO '${escapedPath}'`);
+      } catch {
+        try {
+          if (fs.existsSync(destPath)) fs.unlinkSync(destPath);
+        } catch {
+        }
+        try {
+          db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+        } catch {
+        }
+        fs.copyFileSync(DB_PATH, destPath);
+      }
+    }
+    if (!fs.existsSync(destPath) || fs.statSync(destPath).size <= 0) {
+      try {
+        db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+      } catch {
+      }
+      fs.copyFileSync(DB_PATH, destPath);
+    }
+    const updatedFiles = fs.readdirSync(BACKUP_DIR).filter((f) => f.endsWith(".db"));
+    for (const oldFile of selectAutoBaselineSnapshotsToDelete(updatedFiles, 5)) {
+      try {
+        fs.unlinkSync(path.join(BACKUP_DIR, oldFile));
+      } catch {
+      }
+    }
+    return filename;
+  } catch (err) {
+    console.warn("Auto-baseline snapshot skipped:", err.message);
+    return null;
+  }
+}
+function seedDatabase() {
+  healMalformedAccessLogsIfNeeded();
+  pruneInactiveLeaderboardScores();
+  const seedFlagRow = db.prepare("SELECT value FROM sync_metadata WHERE key = 'initial_seed_completed'").get();
+  const initialSeedCompleted = seedFlagRow?.value === "1";
+  const rowCounts = {
+    users: Number(db.prepare("SELECT COUNT(*) as count FROM users").get().count || 0),
+    certificates: Number(db.prepare("SELECT COUNT(*) as count FROM certificates").get().count || 0),
+    testimonials: Number(db.prepare("SELECT COUNT(*) as count FROM testimonials").get().count || 0),
+    licenses: Number(db.prepare("SELECT COUNT(*) as count FROM licenses").get().count || 0),
+    siteSettings: Number(db.prepare("SELECT COUNT(*) as count FROM site_settings").get().count || 0)
+  };
+  const seedDecision = shouldRunInitialSeed(initialSeedCompleted, rowCounts);
+  if (seedDecision.seedTestimonials) {
+    const insertTesti = db.prepare(`
+      INSERT INTO testimonials (name, role, game, rating, message, status)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `);
+    insertTesti.run(
+      "Bhikkhu Dhammacaro",
+      "Guru Agama Buddha / Pengurus Vihara",
+      "Platform Keseluruhan",
+      5,
+      "Platform ini sangat luar biasa! Dukungan game portable dan database terpusat memudahkan penambahan materi pembelajaran baru untuk kelas Minggu.",
+      "approved"
+    );
+    insertTesti.run(
+      "Dewi Lestari, S.Ag.",
+      "Guru Agama Buddha SMP",
+      "Kuis Perjalanan Siddhartha",
+      5,
+      "Peserta didik sangat antusias berebut posisi di Papan Peringkat Real-time. Materi yang disajikan akurat dan sesuai silabus kurikulum nasional.",
+      "approved"
+    );
+    insertTesti.run(
+      "Sujana Dharmawira, M.Pd.",
+      "Kepala Sekolah Buddhis",
+      "Memory Candi Borobudur",
+      5,
+      "Integrasi visual candi dan sertifikat digital yang dapat diverifikasi kode resminya membuat pembelajaran agama menjadi modern dan bermakna.",
+      "approved"
+    );
+  }
+  if (seedDecision.seedLicenses) {
+    const insertLic = db.prepare(`
+      INSERT INTO licenses (school_name, plan, status, expires_date, license_key)
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    insertLic.run("SMP Maitreyawira Jakarta", "Pro School License (Unlimited)", "Aktif", "2027-12-31", "PGB-LIC-MTW-2027");
+    insertLic.run("Vihara Mendut Magelang", "Vihara Learning Pack", "Aktif", "2028-06-30", "PGB-LIC-MND-2028");
+    insertLic.run("SMA Bodhisatta Tangerang", "Pro Institutional Suite", "Aktif", "2027-10-15", "PGB-LIC-BDS-2027");
+  }
+  if (seedDecision.seedCertificates) {
+    const insertCert = db.prepare(`
+      INSERT INTO certificates (id, student_name, module, institution, date, certificate_number, verification_code)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertCert.run(
+      "CERT-2026-001",
+      "Ananda Budi Santoso",
+      "Dasar-Dasar Tripitaka & Sejarah Buddhis",
+      "Vihara Buddhayana",
+      "2026-03-15",
+      "PGB/DHARMA/2026/001",
+      "CERT-2026-001"
+    );
+    insertCert.run(
+      "CERT-2026-002",
+      "Saddhavati Dewi Lestari",
+      "Penerapan Pancasila Buddhis dalam Kehidupan",
+      "SMP Maitreyawira",
+      "2026-04-10",
+      "PGB/DHARMA/2026/002",
+      "CERT-2026-002"
+    );
+  }
+  if (seedDecision.seedUsers) {
+    const insertUser = db.prepare(`
+      INSERT INTO users (id, name, email, avatar, xp, badge, level, school, role, password)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    insertUser.run(
+      "usr-admin",
+      "Bhadra Dharmasurya (Super Admin)",
+      "admin@dharmasurya.sch.id",
+      "https://api.dicebear.com/7.x/bottts/svg?seed=AdminDharma",
+      2500,
+      "Maha Pandita Dharma",
+      10,
+      "Pusat Kendali Pengelola Dharma",
+      "admin",
+      "admin321"
+    );
+    insertUser.run(
+      "usr-uploader",
+      "Upasaka Studio (Uploader Game)",
+      "uploader@dharmasurya.sch.id",
+      "https://api.dicebear.com/7.x/bottts/svg?seed=UploaderGame",
+      950,
+      "Penyelaras Sila & Samadhi",
+      5,
+      "Studio Media Pembelajaran Dharma",
+      "uploader",
+      "uploader123"
+    );
+    insertUser.run(
+      "usr-1",
+      "Ananda Metta Putra",
+      "ananda.m@dharmasurya.sch.id",
+      "https://api.dicebear.com/7.x/bottts/svg?seed=Ananda",
+      980,
+      "Maha Pandita Dharma",
+      5,
+      "SMP Maitreyawira Jakarta",
+      "user",
+      "dharma123"
+    );
+    insertUser.run(
+      "usr-2",
+      "Saddhavati Dewi",
+      "dewi.s@vihara.org",
+      "https://api.dicebear.com/7.x/bottts/svg?seed=Saddhavati",
+      950,
+      "Penjaga Bodhicitta",
+      4,
+      "Vihara Mendut Magelang",
+      "user",
+      "dharma123"
+    );
+  } else {
+    const adminExists = db.prepare("SELECT id FROM users WHERE role = 'admin' OR email = 'admin@dharmasurya.sch.id'").get();
+    if (!adminExists) {
+      db.prepare(`
+        INSERT INTO users (id, name, email, avatar, xp, badge, level, school, role, password)
+        VALUES ('usr-admin', 'Bhadra Dharmasurya (Super Admin)', 'admin@dharmasurya.sch.id', 'https://api.dicebear.com/7.x/bottts/svg?seed=AdminDharma', 2500, 'Maha Pandita Dharma', 10, 'Pusat Kendali Pengelola Dharma', 'admin', 'admin321')
+      `).run();
+    }
+    const uploaderExists = db.prepare("SELECT id FROM users WHERE role = 'uploader' OR email = 'uploader@dharmasurya.sch.id'").get();
+    if (!uploaderExists) {
+      db.prepare(`
+        INSERT INTO users (id, name, email, avatar, xp, badge, level, school, role, password)
+        VALUES ('usr-uploader', 'Upasaka Studio (Uploader Game)', 'uploader@dharmasurya.sch.id', 'https://api.dicebear.com/7.x/bottts/svg?seed=UploaderGame', 950, 'Penyelaras Sila & Samadhi', 5, 'Studio Media Pembelajaran Dharma', 'uploader', 'uploader123')
+      `).run();
+    }
+    db.prepare("UPDATE users SET role = 'user' WHERE role IS NULL OR role = ''").run();
+    db.prepare("UPDATE users SET password = 'admin321' WHERE role = 'admin' AND (password IS NULL OR password = '')").run();
+    db.prepare("UPDATE users SET password = 'uploader123' WHERE role = 'uploader' AND (password IS NULL OR password = '')").run();
+    db.prepare("UPDATE users SET password = 'dharma123' WHERE password IS NULL OR password = ''").run();
+  }
+  if (seedDecision.seedSettings) {
+    const insertSetting = db.prepare(`INSERT OR IGNORE INTO site_settings (key, value) VALUES (?, ?)`);
+    insertSetting.run("title", "Candi & Stupa Dharma");
+    insertSetting.run("subtitle", "Nilai Kebijaksanaan & Kemurnian");
+    insertSetting.run("emoji", "");
+    insertSetting.run("imageUrl", "");
+    insertSetting.run("announcement", "Selamat datang di Pusat Games Buddhis - Media Pembelajaran Dharma Interaktif Berbasis SQL Terpusat!");
+  }
+  db.prepare("INSERT OR IGNORE INTO sync_metadata (key, value) VALUES ('data_revision', '1')").run();
+  db.prepare("INSERT OR IGNORE INTO sync_metadata (key, value) VALUES ('initial_seed_completed', '1')").run();
+  db.prepare("INSERT OR IGNORE INTO sync_metadata (key, value) VALUES ('baseline_protection', 'enabled')").run();
+  db.prepare("INSERT OR IGNORE INTO sync_metadata (key, value) VALUES ('baseline_established_at', ?)").run((/* @__PURE__ */ new Date()).toISOString());
+  ensureAutoBaselineSnapshotOnStartup();
+}
+seedDatabase();
 
 // server.ts
 var __filename = fileURLToPath(import.meta.url);
@@ -1230,6 +1756,9 @@ app.put("/api/v1/games/:id", (req, res) => {
       }
       throw txErr;
     }
+    if (!newIsActive) {
+      pruneInactiveLeaderboardScores();
+    }
     if (createdCategoryMeta) {
       recordAudit("Admin", "CREATE_CATEGORY", `Auto-synchronized category from game update: ${createdCategoryMeta.name}`);
       broadcastEvent("category:created", createdCategoryMeta);
@@ -1248,6 +1777,9 @@ app.put("/api/v1/games/:id", (req, res) => {
       isActive: Boolean(newIsActive),
       status: newStatus
     });
+    if (!newIsActive) {
+      broadcastEvent("leaderboard:updated", { pruned: true });
+    }
     res.json({
       success: true,
       message: `Data, thumbnail & ikon permainan "${nextTitle}" berhasil diperbarui dan disinkronkan!`,
@@ -1275,8 +1807,15 @@ app.patch("/api/v1/games/:id/status", (req, res) => {
       SET is_active = ?, status = ?, updated_at = CURRENT_TIMESTAMP
       WHERE id = ?
     `).run(newActive, newStatus, id);
+    let prunedCount = 0;
+    if (!newActive) {
+      prunedCount = pruneInactiveLeaderboardScores();
+    }
     recordAudit("Admin", "TOGGLE_GAME_STATUS", `Game "${existing.title}" diubah status menjadi: ${newActive ? "Aktif" : "Nonaktif"}`);
     broadcastEvent("game:updated", { id, title: existing.title, isActive: Boolean(newActive), status: newStatus });
+    if (prunedCount > 0) {
+      broadcastEvent("leaderboard:updated", { pruned: true });
+    }
     res.json({
       success: true,
       message: `Permainan "${existing.title}" berhasil di-${newActive ? "aktifkan" : "nonaktifkan"}!`,
@@ -1296,8 +1835,11 @@ app.delete("/api/v1/games/:id", (req, res) => {
       return;
     }
     db.prepare("DELETE FROM games WHERE id = ?").run(id);
+    db.prepare("DELETE FROM leaderboard WHERE game_id = ? OR LOWER(TRIM(game_title)) = LOWER(TRIM(?))").run(id, g.title);
+    pruneInactiveLeaderboardScores();
     recordAudit("Admin", "DELETE_GAME", `Deleted game: ${g.title}`);
     broadcastEvent("game:deleted", { id, title: g.title });
+    broadcastEvent("leaderboard:updated", { deletedGame: g.title });
     res.json({ success: true, message: "Permainan berhasil dihapus" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -1321,9 +1863,21 @@ app.post("/api/v1/games/reset-stats", (req, res) => {
 });
 app.get("/api/v1/leaderboard", (_req, res) => {
   try {
+    pruneInactiveLeaderboardScores();
     const rows = db.prepare(`
-      SELECT * FROM leaderboard
-      ORDER BY score DESC, xp_earned DESC, id ASC
+      SELECT
+        l.*,
+        g.id AS resolved_game_id,
+        g.title AS resolved_game_title
+      FROM leaderboard l
+      INNER JOIN games g
+        ON (
+          (l.game_id IS NOT NULL AND l.game_id = g.id)
+          OR (l.game_id IS NULL AND LOWER(TRIM(l.game_title)) = LOWER(TRIM(g.title)))
+        )
+      WHERE g.is_active = 1
+        AND (g.status IS NULL OR g.status != 'inactive')
+      ORDER BY l.score DESC, l.xp_earned DESC, l.id DESC
       LIMIT 100
     `).all();
     const formatted = rows.map((r, index) => ({
@@ -1331,8 +1885,8 @@ app.get("/api/v1/leaderboard", (_req, res) => {
       userName: r.user_name,
       userEmail: r.user_email,
       avatar: r.avatar,
-      gameId: r.game_id,
-      gameTitle: r.game_title,
+      gameId: r.resolved_game_id ?? r.game_id,
+      gameTitle: r.resolved_game_title || r.game_title,
       score: r.score,
       xpEarned: r.xp_earned,
       badge: r.badge,
@@ -1359,20 +1913,37 @@ app.post("/api/v1/leaderboard", (req, res) => {
       });
       return;
     }
+    const numericGameId = gameId ? Number(gameId) : null;
+    const matchedGame = numericGameId ? db.prepare("SELECT id, title FROM games WHERE id = ? AND is_active = 1 AND (status IS NULL OR status != 'inactive')").get(numericGameId) : db.prepare("SELECT id, title FROM games WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) AND is_active = 1 AND (status IS NULL OR status != 'inactive') LIMIT 1").get(String(gameTitle));
+    if (!matchedGame) {
+      res.status(400).json({
+        success: false,
+        message: "Permainan sudah tidak aktif atau tidak ditemukan di katalog aktif."
+      });
+      return;
+    }
+    const numericScore = Math.max(0, Math.round(Number(score) || 0));
+    const numericXp = xpEarned !== void 0 ? Math.max(0, Math.round(Number(xpEarned) || 0)) : Math.round(numericScore * 0.5);
     const info = db.prepare(`
       INSERT INTO leaderboard (user_name, user_email, avatar, game_id, game_title, score, xp_earned, badge, school)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      userName.trim(),
+      String(userName).trim(),
       userEmail || null,
-      avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(userName)}`,
-      gameId || null,
-      gameTitle,
-      score,
-      xpEarned || Math.round(score * 0.5),
+      avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(String(userName))}`,
+      matchedGame.id,
+      matchedGame.title,
+      numericScore,
+      numericXp,
       badge || "Sahabat Pemula Dharma",
       school || "Umum / Mandiri"
     );
+    if (userEmail && numericXp > 0) {
+      try {
+        db.prepare("UPDATE users SET xp = xp + ?, updated_at = CURRENT_TIMESTAMP WHERE LOWER(email) = LOWER(?)").run(numericXp, String(userEmail).trim());
+      } catch {
+      }
+    }
     if (accessLogId) {
       try {
         db.prepare("UPDATE game_access_logs SET completed = 1 WHERE id = ?").run(accessLogId);
@@ -1380,12 +1951,8 @@ app.post("/api/v1/leaderboard", (req, res) => {
         console.error("Error updating access log completion:", logErr);
       }
     }
-    if (gameId) {
-      db.prepare("UPDATE games SET players = players + 1 WHERE id = ?").run(gameId);
-    } else {
-      db.prepare("UPDATE games SET players = players + 1 WHERE title = ?").run(gameTitle);
-    }
-    broadcastEvent("leaderboard:updated", { id: info.lastInsertRowid, userName, score });
+    db.prepare("UPDATE games SET players = players + 1 WHERE id = ?").run(matchedGame.id);
+    broadcastEvent("leaderboard:updated", { id: info.lastInsertRowid, userName, gameTitle: matchedGame.title, score: numericScore });
     res.json({ success: true, message: "Skor berhasil dicatat di Papan Peringkat!", id: info.lastInsertRowid });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -1399,13 +1966,20 @@ app.post("/api/v1/leaderboard/reset", (req, res) => {
       res.status(403).json({ success: false, message: "Kata sandi salah! Reset skor leaderboard dibatalkan." });
       return;
     }
-    if (gameTitle && gameTitle.trim()) {
-      db.prepare("DELETE FROM leaderboard WHERE game_title = ?").run(gameTitle.trim());
-      recordAudit("Admin", "RESET_LEADERBOARD_GAME", `Reset skor leaderboard untuk permainan: ${gameTitle}`);
+    if (gameTitle && String(gameTitle).trim()) {
+      const cleanTitle = String(gameTitle).trim();
+      const matched = db.prepare("SELECT id FROM games WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) LIMIT 1").get(cleanTitle);
+      if (matched) {
+        db.prepare("DELETE FROM leaderboard WHERE game_id = ? OR LOWER(TRIM(game_title)) = LOWER(TRIM(?))").run(matched.id, cleanTitle);
+      } else {
+        db.prepare("DELETE FROM leaderboard WHERE LOWER(TRIM(game_title)) = LOWER(TRIM(?))").run(cleanTitle);
+      }
+      recordAudit("Admin", "RESET_LEADERBOARD_GAME", `Reset skor leaderboard untuk permainan: ${cleanTitle}`);
     } else {
       db.prepare("DELETE FROM leaderboard").run();
       recordAudit("Admin", "RESET_LEADERBOARD_ALL", "Reset seluruh data skor leaderboard");
     }
+    pruneInactiveLeaderboardScores();
     broadcastEvent("leaderboard:updated", { reset: true, gameTitle: gameTitle || null });
     res.json({
       success: true,
@@ -2200,6 +2774,30 @@ function createDbSnapshotFile(targetPath) {
   try {
     db.exec(`VACUUM INTO '${escaped}'`);
   } catch {
+    try {
+      if (fs2.existsSync(targetPath)) fs2.unlinkSync(targetPath);
+    } catch {
+    }
+    try {
+      db.exec("REINDEX;");
+      db.exec(`VACUUM INTO '${escaped}'`);
+    } catch {
+      try {
+        if (fs2.existsSync(targetPath)) fs2.unlinkSync(targetPath);
+      } catch {
+      }
+      try {
+        db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+      } catch {
+      }
+      fs2.copyFileSync(DB_PATH, targetPath);
+    }
+  }
+  if (!fs2.existsSync(targetPath) || fs2.statSync(targetPath).size <= 0) {
+    try {
+      db.exec("PRAGMA wal_checkpoint(TRUNCATE);");
+    } catch {
+    }
     fs2.copyFileSync(DB_PATH, targetPath);
   }
 }
@@ -2360,9 +2958,13 @@ function executeNormalizedBackupImport(parsed, mode, sourceLabel) {
     }
     for (const game of parsed.games) {
       const syncedCategory = ensureSynchronizedCategory(game.category, void 0, false);
-      const existingGame = db.prepare("SELECT id, players FROM games WHERE LOWER(title) = LOWER(?) AND LOWER(category) = LOWER(?)").get(game.title, syncedCategory);
+      const existingGame = db.prepare("SELECT id, players, thumbnail, icon, html5_code, url FROM games WHERE LOWER(title) = LOWER(?) AND LOWER(category) = LOWER(?)").get(game.title, syncedCategory);
       if (existingGame) {
         const mergedPlayers = Math.max(Number(existingGame.players || 0), game.players);
+        const mergedThumbnail = mode === "merge" ? game.thumbnail && String(game.thumbnail).trim() ? game.thumbnail : String(existingGame.thumbnail || "") : game.thumbnail;
+        const mergedIcon = mode === "merge" ? game.icon && String(game.icon).trim() ? game.icon : String(existingGame.icon || "") : game.icon;
+        const mergedHtml5 = mode === "merge" ? game.html5Code || String(existingGame.html5_code || "") : game.html5Code;
+        const mergedUrl = mode === "merge" ? game.url || String(existingGame.url || "") : game.url;
         db.prepare(`
           UPDATE games
           SET slug = ?, difficulty = ?, type = ?, rating = ?, players = ?,
@@ -2375,13 +2977,13 @@ function executeNormalizedBackupImport(parsed, mode, sourceLabel) {
           game.type,
           game.rating,
           mergedPlayers,
-          game.thumbnail,
-          game.icon,
+          mergedThumbnail,
+          mergedIcon,
           game.description,
           game.isPremium ? 1 : 0,
           game.isActive ? 1 : 0,
-          game.html5Code,
-          game.url,
+          mergedHtml5,
+          mergedUrl,
           game.status,
           game.featured ? 1 : 0,
           existingGame.id
@@ -2413,12 +3015,22 @@ function executeNormalizedBackupImport(parsed, mode, sourceLabel) {
         );
       }
     }
+    const currentSettingRows = db.prepare("SELECT key, value FROM site_settings").all();
+    const currentSettingsObj = {};
+    for (const r of currentSettingRows) {
+      currentSettingsObj[r.key] = r.value;
+    }
+    const finalSettings = mergeExistingAndImportedSettings(
+      currentSettingsObj,
+      parsed.siteSettings,
+      mode
+    );
     const upsertSetting = db.prepare(`
       INSERT INTO site_settings (key, value, updated_at)
       VALUES (?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
     `);
-    for (const [k, v] of Object.entries(parsed.siteSettings)) {
+    for (const [k, v] of Object.entries(finalSettings)) {
       if (v !== void 0) {
         upsertSetting.run(k, String(v));
       }
@@ -2483,21 +3095,29 @@ function executeNormalizedBackupImport(parsed, mode, sourceLabel) {
       }
     }
     for (const lb of parsed.leaderboard) {
-      const dup = db.prepare("SELECT id FROM leaderboard WHERE LOWER(user_name) = LOWER(?) AND LOWER(game_title) = LOWER(?) AND score = ?").get(lb.userName, lb.gameTitle, lb.score);
+      const matchedGame = db.prepare("SELECT id, title FROM games WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) AND is_active = 1 AND (status IS NULL OR status != 'inactive') LIMIT 1").get(lb.gameTitle);
+      if (!matchedGame) continue;
+      const dup = db.prepare("SELECT id FROM leaderboard WHERE LOWER(user_name) = LOWER(?) AND game_id = ? AND score = ?").get(lb.userName, matchedGame.id, lb.score);
       if (!dup) {
         db.prepare(`
-          INSERT INTO leaderboard (user_name, user_email, avatar, game_title, score, xp_earned, badge, school)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(lb.userName, lb.userEmail, lb.avatar, lb.gameTitle, lb.score, lb.xpEarned, lb.badge, lb.school);
+          INSERT INTO leaderboard (user_name, user_email, avatar, game_id, game_title, score, xp_earned, badge, school)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(lb.userName, lb.userEmail, lb.avatar, matchedGame.id, matchedGame.title, lb.score, lb.xpEarned, lb.badge, lb.school);
       }
     }
+    pruneInactiveLeaderboardScores();
     for (const u of parsed.users) {
-      const existingUser = db.prepare("SELECT id FROM users WHERE id = ? OR LOWER(email) = LOWER(?)").get(u.id, u.email);
+      const existingUser = db.prepare("SELECT id, xp, level, badge, school, avatar FROM users WHERE id = ? OR LOWER(email) = LOWER(?)").get(u.id, u.email);
       if (existingUser) {
+        const mergedXp = mode === "merge" ? Math.max(Number(existingUser.xp || 0), u.xp) : u.xp;
+        const mergedLevel = mode === "merge" ? Math.max(Number(existingUser.level || 1), u.level) : u.level;
+        const mergedAvatar = mode === "merge" ? u.avatar || String(existingUser.avatar || "") : u.avatar;
+        const mergedSchool = mode === "merge" ? u.school || String(existingUser.school || "") : u.school;
+        const mergedBadge = mode === "merge" ? u.badge || String(existingUser.badge || "Sahabat Pemula Dharma") : u.badge;
         db.prepare(`
           UPDATE users SET name = ?, avatar = ?, xp = ?, badge = ?, level = ?, school = ?, role = ?, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
-        `).run(u.name, u.avatar, u.xp, u.badge, u.level, u.school, u.role, existingUser.id);
+        `).run(u.name, mergedAvatar, mergedXp, mergedBadge, mergedLevel, mergedSchool, u.role, existingUser.id);
       } else {
         db.prepare(`
           INSERT INTO users (id, name, email, avatar, xp, badge, level, school, role, password)
@@ -2572,7 +3192,7 @@ app.get("/api/v1/backup/snapshots", (_req, res) => {
         sizeBytes: stats.size,
         createdAt: stats.mtime.toISOString()
       };
-    }).sort((a, b) => a.createdAt < b.createdAt ? 1 : -1);
+    }).filter((f) => f.sizeBytes > 0).sort((a, b) => a.createdAt < b.createdAt ? 1 : -1);
     res.json({ success: true, data: files });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -2698,6 +3318,77 @@ app.post("/api/v1/backup/snapshots/:filename/restore", (req, res) => {
     });
   } catch (error) {
     res.status(400).json({ success: false, message: error.message });
+  }
+});
+app.get("/api/v1/backup/baseline-status", (_req, res) => {
+  try {
+    ensureAutoBaselineSnapshotOnStartup();
+    const metaRows = db.prepare("SELECT key, value FROM sync_metadata WHERE key IN ('baseline_protection', 'initial_seed_completed', 'baseline_established_at')").all();
+    const metaMap = {};
+    for (const r of metaRows) {
+      metaMap[r.key] = r.value;
+    }
+    let latestBaselineSnapshot = null;
+    if (fs2.existsSync(BACKUP_DIR)) {
+      const dbFiles = fs2.readdirSync(BACKUP_DIR).filter((f) => f.endsWith(".db")).map((filename) => {
+        const stats = fs2.statSync(path2.join(BACKUP_DIR, filename));
+        return {
+          filename,
+          sizeBytes: stats.size,
+          createdAt: stats.mtime.toISOString()
+        };
+      }).filter((f) => f.sizeBytes > 0).sort((a, b) => a.createdAt < b.createdAt ? 1 : -1);
+      latestBaselineSnapshot = dbFiles.find((f) => /^auto-baseline_.*\.db$/i.test(f.filename)) || dbFiles[0] || null;
+    }
+    res.json({
+      success: true,
+      data: {
+        protected: metaMap.baseline_protection === "enabled",
+        initialSeedCompleted: metaMap.initial_seed_completed === "1",
+        baselineEstablishedAt: metaMap.baseline_established_at || null,
+        latestBaselineSnapshot,
+        counts: getBaselineDatabaseCounts()
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+app.post("/api/v1/backup/sync-from-url", async (req, res) => {
+  try {
+    const cleanUrl = validatePublishedSyncUrl(String(req.body?.sourceUrl || ""));
+    const mode = req.body?.mode === "replace" ? "replace" : "merge";
+    const exportEndpoint = `${cleanUrl}/api/v1/backup/export`;
+    const resp = await fetch(exportEndpoint, {
+      method: "GET",
+      headers: {
+        Accept: "application/json",
+        "Cache-Control": "no-cache"
+      },
+      signal: AbortSignal.timeout(15e3)
+    });
+    const contentType = String(resp.headers.get("content-type") || "").toLowerCase();
+    if (!resp.ok || !contentType.includes("application/json")) {
+      res.status(400).json({
+        success: false,
+        message: `Gagal menarik data otomatis dari "${cleanUrl}" (HTTP ${resp.status} atau halaman memerlukan autentikasi browser). Silakan buka website terpublish di browser -> Admin Hub -> Tab Backup & Restore -> klik "Unduh Backup JSON" atau "Unduh File SQLite (.db)", lalu impor file tersebut di sini menggunakan Mode Gabungkan (Merge).`
+      });
+      return;
+    }
+    const rawJson = await resp.json();
+    const payloadCandidate = rawJson?.data && rawJson?.success === true ? rawJson.data : rawJson;
+    const parsed = parseBackupPayload(payloadCandidate);
+    const result = executeNormalizedBackupImport(parsed, mode, `Website Terpublish (${cleanUrl})`);
+    res.json({
+      success: true,
+      message: `Data dari website terpublish (${cleanUrl}) berhasil ditarik & ${mode === "replace" ? "dipulihkan" : "digabungkan tanpa menghapus data lokal"}! (${result.imported.games} game, ${result.imported.categories} kategori, ${result.imported.users} pengguna)`,
+      mode,
+      safetySnapshot: result.safetySnapshot,
+      imported: result.imported
+    });
+  } catch (error) {
+    const msg = error.message || "Gagal menyinkronkan dari URL terpublish.";
+    res.status(400).json({ success: false, message: msg });
   }
 });
 async function startServer() {

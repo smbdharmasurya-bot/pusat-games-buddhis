@@ -27,6 +27,7 @@ import {
   resolveRealtimeToastMessage,
   shouldAutoRefreshOnVisibility,
 } from './utils/realtimeSync';
+import { filterActiveGamesLeaderboard } from './utils/scoreAutoSync';
 
 interface Toast {
   id: number;
@@ -311,7 +312,8 @@ export default function App() {
     scoreVal: number,
     xpEarned: number,
     isCompleted: boolean = true,
-    accessLogId?: number
+    accessLogId?: number,
+    gameId?: number
   ) => {
     try {
       const pName = currentUser?.name || 'Tamu Dharma';
@@ -322,6 +324,7 @@ export default function App() {
       await api.submitScore({
         userName: pName,
         userEmail: pEmail,
+        gameId,
         gameTitle,
         score: scoreVal,
         xpEarned,
@@ -341,7 +344,7 @@ export default function App() {
         localStorage.setItem('pgb_active_user', JSON.stringify(updatedUser));
       }
 
-      showToast(`Skor (${scoreVal} pts / +${xpEarned} XP) berhasil dicatat otomatis ke Papan Peringkat!`, 'success');
+      showToast(`Skor (${scoreVal} pts / +${xpEarned} XP) untuk "${gameTitle}" berhasil dicatat otomatis ke Papan Peringkat!`, 'success');
       loadAllData();
     } catch (err) {
       showToast((err as Error).message, 'warning');
@@ -363,6 +366,10 @@ export default function App() {
 
   const activeGames = React.useMemo(() => games.filter((g) => g.isActive !== false), [games]);
   const featuredGames = React.useMemo(() => activeGames.filter((g) => g.featured || g.rating >= 4.9), [activeGames]);
+  const activeLeaderboard = React.useMemo(
+    () => filterActiveGamesLeaderboard(leaderboard, games),
+    [leaderboard, games]
+  );
 
   React.useEffect(() => {
     setSelectedCategory((prev) => sanitizeSelectedCategory(prev, categories));
@@ -549,7 +556,7 @@ export default function App() {
         {/* VIEW 4: REAL-TIME LEADERBOARD */}
         {currentView === 'leaderboard' && (
           <LeaderboardView
-            entries={leaderboard}
+            entries={activeLeaderboard}
             isLoading={isLoading}
             onRefresh={loadAllData}
           />
@@ -559,6 +566,7 @@ export default function App() {
         {currentView === 'testimonials' && (
           <TestimonialsView
             testimonials={testimonials.filter((t) => t.status === 'approved')}
+            games={activeGames}
             onSubmit={handleSubmitTestimonial}
           />
         )}

@@ -31,11 +31,19 @@ import { calculateScoreAndXP } from '../utils/gameLogic';
 import confetti from 'canvas-confetti';
 import { api } from '../services/api';
 import { GameIconBadge } from './GameIconBadge';
+import { resolveAutoCloseScore } from '../utils/scoreAutoSync';
 
 interface GamePlayerModalProps {
   game: Game | null;
   onClose: () => void;
-  onSubmitScore: (gameTitle: string, score: number, xpEarned: number, isCompleted?: boolean, accessLogId?: number) => Promise<void>;
+  onSubmitScore: (
+    gameTitle: string,
+    score: number,
+    xpEarned: number,
+    isCompleted?: boolean,
+    accessLogId?: number,
+    gameId?: number
+  ) => Promise<void>;
   playerName: string;
 }
 
@@ -173,10 +181,49 @@ ${code}
       window.addEventListener('touchstart', unlockAudio, { passive: true });
       window.addEventListener('keydown', unlockAudio, { passive: true });
 
-      // 3. Smart completion observer & postMessage bridge
+      // 3. Smart completion observer, live score reader & postMessage bridge
       (function() {
         var hasReportedCompletion = false;
+        var lastLiveScoreSent = 0;
+
+        function readLiveDomScore(rootEl) {
+          var scope = rootEl || document;
+          var scoreSelectors = [
+            '#result-final-score', '#final-score', '.final-score',
+            '#score', '.score', '[data-score]', '[id*="score"]', '[class*="score"]'
+          ];
+          for (var s = 0; s < scoreSelectors.length; s++) {
+            var els = scope.querySelectorAll(scoreSelectors[s]);
+            for (var j = 0; j < els.length; j++) {
+              var candidate = els[j];
+              var rawAttr = candidate.getAttribute && candidate.getAttribute('data-score');
+              var rawText = rawAttr || candidate.innerText || candidate.textContent || '';
+              var trimmed = String(rawText).trim();
+              if (!trimmed || trimmed.length > 40) continue;
+              var parsed = parseInt(trimmed.replace(/[^0-9]/g, ''), 10);
+              if (!isNaN(parsed) && parsed > 0 && parsed <= 1000000) {
+                return parsed;
+              }
+            }
+          }
+          return 0;
+        }
+
+        function scanLiveScore() {
+          var liveScore = readLiveDomScore(document);
+          if (liveScore > 0 && liveScore !== lastLiveScoreSent) {
+            lastLiveScoreSent = liveScore;
+            try {
+              window.parent.postMessage({
+                type: 'PORTAL_GAME_SCORE_LIVE',
+                score: liveScore
+              }, '*');
+            } catch(e) {}
+          }
+        }
+
         function scanForGameCompletion() {
+          scanLiveScore();
           if (hasReportedCompletion) return;
           var selectors = [
             '#screen-result', '.screen-result', '#game-over', '.game-over',
@@ -188,12 +235,8 @@ ${code}
             if (el) {
               var isHidden = el.classList.contains('hidden') || el.style.display === 'none' || el.style.visibility === 'hidden';
               if (!isHidden) {
-                var scoreEl = el.querySelector('#result-final-score, #final-score, .final-score, [id*="score"]');
-                var finalScore = 500;
-                if (scoreEl) {
-                  var parsed = parseInt(scoreEl.innerText.replace(/[^0-9]/g, ''), 10);
-                  if (!isNaN(parsed) && parsed > 0) finalScore = parsed;
-                }
+                var detected = readLiveDomScore(el) || readLiveDomScore(document);
+                var finalScore = detected > 0 ? detected : 500;
                 hasReportedCompletion = true;
                 try {
                   window.parent.postMessage({
@@ -210,17 +253,23 @@ ${code}
         }
 
         var domObserver = new MutationObserver(scanForGameCompletion);
-        if (document.body) {
-          domObserver.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['class', 'style', 'hidden'] });
-        } else {
-          document.addEventListener('DOMContentLoaded', function() {
-            domObserver.observe(document.body, { attributes: true, subtree: true, attributeFilter: ['class', 'style', 'hidden'] });
-          });
+        function initObservers() {
+          if (document.body) {
+            domObserver.observe(document.body, { attributes: true, childList: true, characterData: true, subtree: true, attributeFilter: ['class', 'style', 'hidden', 'data-score'] });
+          }
+          scanForGameCompletion();
         }
-        setInterval(scanForGameCompletion, 1500);
+        if (document.body) {
+          initObservers();
+        } else {
+          document.addEventListener('DOMContentLoaded', initObservers);
+        }
+        window.addEventListener('load', scanForGameCompletion);
+        setInterval(scanForGameCompletion, 500);
+        window.addEventListener('beforeunload', scanLiveScore);
 
         window.addEventListener('message', function(ev) {
-          if (ev && ev.data && (ev.data.type === 'portal_game_score' || ev.data.type === 'PORTAL_GAME_COMPLETED' || ev.data.finished)) {
+          if (ev && ev.data && (ev.data.type === 'portal_game_score' || ev.data.type === 'PORTAL_GAME_COMPLETED' || ev.data.type === 'PORTAL_GAME_SCORE_LIVE' || ev.data.finished)) {
             try {
               window.parent.postMessage(ev.data, '*');
             } catch(err) {}
@@ -261,9 +310,21 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
   const [customScoreInput, setCustomScoreInput] = React.useState<number>(500);
   const [showScoreInputModal, setShowScoreInputModal] = React.useState(false);
 
-  // Track access log on game launch
+  const hasRecordedAutoScoreRef = React.useRef(false);
+  const latestPortableScoreRef = React.useRef(0);
+  const liveSessionRef = React.useRef({
+    game,
+    score: 0,
+    streak: 0,
+    matchedPairs: 0,
+    playDurationSeconds: 0,
+    accessLogId: null as number | null,
+    playerName,
+  });
+
+  // Track access log once per opened game session
   React.useEffect(() => {
-    if (!game) return;
+    if (!game?.id) return;
     let isMounted = true;
     api.recordGameAccess({
       gameId: game.id,
@@ -288,7 +349,8 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
     return () => {
       isMounted = false;
     };
-  }, [game, playerName]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [game?.id, playerName]);
 
   // Periodic heartbeat & duration counter
   React.useEffect(() => {
@@ -354,6 +416,8 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
   }, []);
 
   React.useEffect(() => {
+    hasRecordedAutoScoreRef.current = false;
+    latestPortableScoreRef.current = 0;
     if (game?.type === 'memory') {
       initMemoryGame();
     } else {
@@ -367,7 +431,20 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
     setPortableScoreSaved(false);
     setPortableGameCompleted(false);
     setPlayDurationSeconds(0);
-  }, [game, initMemoryGame]);
+  }, [game?.id, game?.type, initMemoryGame]);
+
+  // Keep latest session metrics accessible to close/unload callbacks
+  React.useEffect(() => {
+    liveSessionRef.current = {
+      game,
+      score,
+      streak,
+      matchedPairs: cards.filter((c) => c.matched).length / 2,
+      playDurationSeconds,
+      accessLogId,
+      playerName,
+    };
+  }, [game, score, streak, cards, playDurationSeconds, accessLogId, playerName]);
 
   // Listen to fullscreen changes
   React.useEffect(() => {
@@ -378,20 +455,39 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
     return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
-  // Listen for message from iframe (score sync & game completion)
+  // Listen for message from iframe (live score sync & game completion)
   React.useEffect(() => {
     const handleIframeMessage = (event: MessageEvent) => {
-      if (event.data && (event.data.type === 'portal_game_score' || event.data.type === 'PORTAL_GAME_COMPLETED')) {
-        const gameScore = typeof event.data.score === 'number' && event.data.score > 0 ? event.data.score : 500;
+      if (!event.data || typeof event.data !== 'object') return;
+
+      if (event.data.type === 'PORTAL_GAME_SCORE_LIVE') {
+        const liveVal = Number(event.data.score);
+        if (!Number.isNaN(liveVal) && liveVal > 0) {
+          const rounded = Math.round(liveVal);
+          latestPortableScoreRef.current = rounded;
+          setCustomScoreInput(rounded);
+        }
+        return;
+      }
+
+      if (event.data.type === 'portal_game_score' || event.data.type === 'PORTAL_GAME_COMPLETED') {
+        const gameScore =
+          typeof event.data.score === 'number' && event.data.score > 0
+            ? Math.round(event.data.score)
+            : latestPortableScoreRef.current > 0
+            ? latestPortableScoreRef.current
+            : 500;
+        latestPortableScoreRef.current = gameScore;
         setCustomScoreInput(gameScore);
         setPortableGameCompleted(true);
         playVictorySound();
         confetti({ particleCount: 80, spread: 70 });
 
-        if (!portableScoreSaved && game) {
+        if (!portableScoreSaved && !hasRecordedAutoScoreRef.current && game) {
+          hasRecordedAutoScoreRef.current = true;
           setPortableScoreSaved(true);
-          const xp = Math.round(gameScore * 0.5);
-          onSubmitScore(game.title, gameScore, xp, true, accessLogId || undefined);
+          const xp = Math.max(1, Math.round(gameScore * 0.5));
+          void onSubmitScore(game.title, gameScore, xp, true, accessLogId || undefined, game.id);
           if (accessLogId) {
             api.updateGameHeartbeat(accessLogId, playDurationSeconds, true).catch(() => {});
           }
@@ -406,7 +502,93 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
     return () => window.removeEventListener('message', handleIframeMessage);
   }, [game, portableScoreSaved, accessLogId, playDurationSeconds, onSubmitScore]);
 
-  if (!game) return null;
+  const handleCloseGame = React.useCallback(() => {
+    const current = liveSessionRef.current;
+    if (current.game && current.game.isActive !== false && !hasRecordedAutoScoreRef.current) {
+      hasRecordedAutoScoreRef.current = true;
+      const auto = resolveAutoCloseScore({
+        gameType: current.game.type,
+        difficulty: current.game.difficulty,
+        quizScore: current.score,
+        streak: current.streak,
+        matchedPairs: current.matchedPairs,
+        detectedPortableScore: latestPortableScoreRef.current,
+        playDurationSeconds: current.playDurationSeconds,
+      });
+      void onSubmitScore(
+        current.game.title,
+        auto.score,
+        auto.xp,
+        true,
+        current.accessLogId || undefined,
+        current.game.id
+      );
+      if (current.accessLogId) {
+        api.updateGameHeartbeat(current.accessLogId, current.playDurationSeconds, true).catch(() => {});
+      }
+    }
+    onClose();
+  }, [onClose, onSubmitScore]);
+
+  // Close with Escape key (auto-records score)
+  React.useEffect(() => {
+    if (!game) return;
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !showScoreInputModal) {
+        handleCloseGame();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [game, showScoreInputModal, handleCloseGame]);
+
+  // Auto-record score if browser tab closes unexpectedly while playing
+  React.useEffect(() => {
+    const handleBeforeUnload = () => {
+      const current = liveSessionRef.current;
+      if (!current.game || current.game.isActive === false || hasRecordedAutoScoreRef.current) {
+        return;
+      }
+      hasRecordedAutoScoreRef.current = true;
+      const auto = resolveAutoCloseScore({
+        gameType: current.game.type,
+        difficulty: current.game.difficulty,
+        quizScore: current.score,
+        streak: current.streak,
+        matchedPairs: current.matchedPairs,
+        detectedPortableScore: latestPortableScoreRef.current,
+        playDurationSeconds: current.playDurationSeconds,
+      });
+
+      let activeUser: { name?: string; email?: string; school?: string; avatar?: string } | null = null;
+      try {
+        const saved = localStorage.getItem('pgb_active_user');
+        if (saved) activeUser = JSON.parse(saved);
+      } catch {
+        // ignore storage error
+      }
+
+      const pName = activeUser?.name || 'Tamu Dharma';
+      const payload = JSON.stringify({
+        userName: pName,
+        userEmail: activeUser?.email || undefined,
+        gameId: current.game.id,
+        gameTitle: current.game.title,
+        score: auto.score,
+        xpEarned: auto.xp,
+        school: activeUser?.school || (activeUser ? 'Sekolah Dharma' : 'Tamu (Tanpa Login)'),
+        avatar: activeUser?.avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(pName)}`,
+        isCompleted: true,
+        accessLogId: current.accessLogId || undefined,
+      });
+
+      if (typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+        navigator.sendBeacon('/api/v1/leaderboard', new Blob([payload], { type: 'application/json' }));
+      }
+    };
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, []);
 
   const toggleFullscreen = () => {
     const el = document.getElementById('game-player-wrapper');
@@ -422,6 +604,9 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
   const handleReloadGame = () => {
     setIframeKey((k) => k + 1);
     setPortableScoreSaved(false);
+    setPortableGameCompleted(false);
+    latestPortableScoreRef.current = 0;
+    hasRecordedAutoScoreRef.current = false;
   };
 
   // Handle Quiz Option Selection
@@ -495,46 +680,47 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
   };
 
   const calculatedResult = calculateScoreAndXP(
-    game.type === 'memory' ? Math.max(100, 400 - memoryMoves * 15) : score,
-    game.difficulty,
+    game?.type === 'memory' ? Math.max(100, 400 - memoryMoves * 15) : score,
+    game?.difficulty || 'Mudah',
     streak
   );
 
-  const handleSaveToLeaderboard = async () => {
+  const handleSaveToLeaderboard = React.useCallback(async () => {
+    if (!game || hasRecordedAutoScoreRef.current) return;
+    hasRecordedAutoScoreRef.current = true;
     setScoreSubmitted(true);
-    await onSubmitScore(game.title, calculatedResult.score, calculatedResult.xp, true, accessLogId || undefined);
+    await onSubmitScore(game.title, calculatedResult.score, calculatedResult.xp, true, accessLogId || undefined, game.id);
     if (accessLogId) {
       api.updateGameHeartbeat(accessLogId, playDurationSeconds, true).catch(() => {});
     }
     playBellSound();
-  };
+  }, [game, onSubmitScore, calculatedResult.score, calculatedResult.xp, accessLogId, playDurationSeconds]);
 
   // Automatically record score when Quiz finishes
   React.useEffect(() => {
     if (quizFinished && !scoreSubmitted && game?.type === 'quiz') {
-      handleSaveToLeaderboard();
+      void handleSaveToLeaderboard();
       setCompletionNotice(`🎉 Kuis Selesai! Skor ${calculatedResult.score} pts (+${calculatedResult.xp} XP) otomatis dicatat ke Papan Peringkat!`);
     }
-  }, [quizFinished, scoreSubmitted, game?.type]);
+  }, [quizFinished, scoreSubmitted, game?.type, handleSaveToLeaderboard, calculatedResult.score, calculatedResult.xp]);
 
   // Automatically record score when Memory match finishes
   React.useEffect(() => {
     if (memoryFinished && !scoreSubmitted && game?.type === 'memory') {
-      handleSaveToLeaderboard();
+      void handleSaveToLeaderboard();
       setCompletionNotice(`🎉 Memory Candi Berhasil Diselesaikan! Skor otomatis dicatat ke Papan Peringkat!`);
     }
-  }, [memoryFinished, scoreSubmitted, game?.type]);
+  }, [memoryFinished, scoreSubmitted, game?.type, handleSaveToLeaderboard]);
 
   const handleSavePortableScore = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!portableGameCompleted && playDurationSeconds < 25) {
-      setCompletionNotice('⚠️ Catat skor hanya berlaku jika Anda telah menyelesaikan permainan sampai tamat!');
-      return;
-    }
+    if (!game) return;
+    hasRecordedAutoScoreRef.current = true;
     setPortableScoreSaved(true);
     setShowScoreInputModal(false);
-    const xp = Math.round(customScoreInput * 0.5);
-    await onSubmitScore(game.title, customScoreInput, xp, true, accessLogId || undefined);
+    const numericScore = Math.max(0, Math.round(Number(customScoreInput) || 0));
+    const xp = Math.round(numericScore * 0.5);
+    await onSubmitScore(game.title, numericScore, xp, true, accessLogId || undefined, game.id);
     if (accessLogId) {
       api.updateGameHeartbeat(accessLogId, playDurationSeconds, true).catch(() => {});
     }
@@ -543,11 +729,13 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
   };
 
   const processedHtml = React.useMemo(() => {
-    if (game.type === 'html5') {
+    if (game?.type === 'html5') {
       return preparePortableHtml(game.html5Code || '', game.title);
     }
     return '';
-  }, [game.type, game.html5Code, game.title]);
+  }, [game?.type, game?.html5Code, game?.title]);
+
+  if (!game) return null;
 
   const isPortable = game.type === 'html5' || game.type === 'iframe';
 
@@ -628,24 +816,27 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
               </button>
             )}
 
-            {/* Save score to leaderboard for portable games (Only valid when game is completed) */}
+            {/* Save score to leaderboard for portable games */}
             {isPortable && (
               <button
                 type="button"
                 onClick={() => {
                   if (portableScoreSaved) return;
-                  if (portableGameCompleted) {
-                    setShowScoreInputModal(true);
-                  } else if (playDurationSeconds >= 25) {
-                    // Player has played sufficiently to confirm completion
-                    setPortableGameCompleted(true);
-                    setShowScoreInputModal(true);
-                  } else {
-                    setCompletionNotice(
-                      `⚠️ Catat skor hanya berlaku jika mampu menyelesaikan game sampai akhir, bukan hanya membuka saja! (Baru berjalan ${playDurationSeconds} detik)`
-                    );
-                    setTimeout(() => setCompletionNotice(null), 6000);
+                  if (latestPortableScoreRef.current > 0) {
+                    setCustomScoreInput(latestPortableScoreRef.current);
+                  } else if (!portableGameCompleted) {
+                    const fallbackAuto = resolveAutoCloseScore({
+                      gameType: game.type,
+                      difficulty: game.difficulty,
+                      quizScore: 0,
+                      streak: 0,
+                      matchedPairs: 0,
+                      detectedPortableScore: 0,
+                      playDurationSeconds,
+                    });
+                    setCustomScoreInput(fallbackAuto.score);
                   }
+                  setShowScoreInputModal(true);
                 }}
                 disabled={portableScoreSaved}
                 className={`px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-xl text-[11px] sm:text-xs font-bold transition flex items-center gap-1.5 cursor-pointer ${
@@ -702,10 +893,10 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
               <EyeOff className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
 
-            {/* Close Button */}
+            {/* Close Button (auto-records score) */}
             <button
               type="button"
-              onClick={onClose}
+              onClick={handleCloseGame}
               className="px-2.5 sm:px-4 py-1.5 sm:py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold shadow flex items-center gap-1 transition cursor-pointer"
             >
               <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
@@ -737,7 +928,7 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
           </button>
           <button
             type="button"
-            onClick={onClose}
+            onClick={handleCloseGame}
             className="text-rose-400 hover:text-rose-300 p-0.5 cursor-pointer"
             title="Tutup Game"
           >

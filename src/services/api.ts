@@ -412,6 +412,17 @@ export const api = {
     });
   },
 
+  async getBaselineStatus(): Promise<import('../types').BaselineStatus> {
+    return fetchJSON<import('../types').BaselineStatus>('/backup/baseline-status');
+  },
+
+  async syncFromPublishedUrl(sourceUrl: string, mode: BackupImportMode = 'merge'): Promise<BackupImportResult> {
+    return fetchJSON<BackupImportResult>('/backup/sync-from-url', {
+      method: 'POST',
+      body: JSON.stringify({ sourceUrl, mode }),
+    });
+  },
+
   async getSyncState(): Promise<SyncStateResponse> {
     return fetchJSON<SyncStateResponse>('/sync/state');
   },

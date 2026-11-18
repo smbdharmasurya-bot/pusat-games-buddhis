@@ -1,10 +1,12 @@
 import React from 'react';
-import { Testimonial } from '../types';
+import { Game, Testimonial } from '../types';
 import { Star, MessageSquarePlus, CheckCircle, ShieldCheck } from 'lucide-react';
 import { playCorrectSound } from '../utils/soundEffects';
+import { getEvaluatableGameOptions } from '../utils/scoreAutoSync';
 
 interface TestimonialsViewProps {
   testimonials: Testimonial[];
+  games: Game[];
   onSubmit: (testi: {
     name: string;
     role: string;
@@ -16,6 +18,7 @@ interface TestimonialsViewProps {
 
 export const TestimonialsView: React.FC<TestimonialsViewProps> = ({
   testimonials,
+  games,
   onSubmit,
 }) => {
   const [name, setName] = React.useState('');
@@ -25,6 +28,14 @@ export const TestimonialsView: React.FC<TestimonialsViewProps> = ({
   const [message, setMessage] = React.useState('');
   const [submitted, setSubmitted] = React.useState(false);
   const [isSubmitting, setIsSubmitting] = React.useState(false);
+
+  const evaluatableGames = React.useMemo(() => getEvaluatableGameOptions(games), [games]);
+
+  React.useEffect(() => {
+    if (game && !evaluatableGames.some((g) => g.title === game)) {
+      setGame('');
+    }
+  }, [evaluatableGames, game]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -100,15 +111,35 @@ export const TestimonialsView: React.FC<TestimonialsViewProps> = ({
             </div>
 
             <div>
-              <label className="text-[11px] font-bold uppercase text-slate-400">Game yang Dievaluasi</label>
-              <input
-                type="text"
+              <label htmlFor="testimonial-game-select" className="text-[11px] font-bold uppercase text-slate-400">
+                Game yang Dievaluasi
+              </label>
+              <select
+                id="testimonial-game-select"
                 required
                 value={game}
                 onChange={(e) => setGame(e.target.value)}
-                placeholder="Contoh: Kuis Perjalanan Siddhartha / Platform"
-                className="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none text-slate-800 dark:text-slate-100"
-              />
+                disabled={evaluatableGames.length === 0}
+                className="w-full mt-1 p-2.5 rounded-xl bg-slate-100 dark:bg-slate-800 border-0 text-xs focus:ring-2 focus:ring-amber-500 outline-none text-slate-800 dark:text-slate-100 disabled:opacity-60 cursor-pointer"
+              >
+                {evaluatableGames.length === 0 ? (
+                  <option value="">-- Belum ada game yang diupload --</option>
+                ) : (
+                  <>
+                    <option value="">-- Pilih Nama Game yang Diupload --</option>
+                    {evaluatableGames.map((g) => (
+                      <option key={g.id} value={g.title}>
+                        {g.title} ({g.category})
+                      </option>
+                    ))}
+                  </>
+                )}
+              </select>
+              {evaluatableGames.length === 0 && (
+                <p className="text-[11px] text-amber-600 dark:text-amber-400 mt-1">
+                  Dropdown otomatis terisi mengikuti nama game yang diunggah melalui Admin Hub.
+                </p>
+              )}
             </div>
 
             <div>
@@ -138,8 +169,8 @@ export const TestimonialsView: React.FC<TestimonialsViewProps> = ({
 
             <button
               type="submit"
-              disabled={isSubmitting}
-              className="w-full py-3 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs shadow-md shadow-amber-600/20 transition cursor-pointer disabled:opacity-50"
+              disabled={isSubmitting || evaluatableGames.length === 0}
+              className="w-full py-3 rounded-2xl bg-amber-600 hover:bg-amber-700 text-white font-semibold text-xs shadow-md shadow-amber-600/20 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSubmitting ? 'Mengirim...' : 'Kirim Testimoni (Moderasi Server)'}
             </button>

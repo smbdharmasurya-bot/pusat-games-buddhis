@@ -4,7 +4,14 @@ import os from 'node:os';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
-import { db, DB_PATH, BACKUP_DIR } from './src/server/db.ts';
+import {
+  db,
+  DB_PATH,
+  BACKUP_DIR,
+  pruneInactiveLeaderboardScores,
+  getBaselineDatabaseCounts,
+  ensureAutoBaselineSnapshotOnStartup,
+} from './src/server/db.ts';
 import { normalizeCategoryName, slugifyCategory, resolveCategoryMatch } from './src/utils/categorySync.ts';
 import { mergeGameMediaPatch, normalizeGameMediaValue } from './src/utils/gameMedia.ts';
 import {
@@ -14,6 +21,10 @@ import {
   parseBackupPayload,
   summarizeBackupPayload,
 } from './src/utils/backupSync.ts';
+import {
+  mergeExistingAndImportedSettings,
+  validatePublishedSyncUrl,
+} from './src/utils/baselineProtection.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -660,6 +671,10 @@ app.put('/api/v1/games/:id', (req: Request, res: Response) => {
       throw txErr;
     }
 
+    if (!newIsActive) {
+      pruneInactiveLeaderboardScores();
+    }
+
     if (createdCategoryMeta) {
       recordAudit('Admin', 'CREATE_CATEGORY', `Auto-synchronized category from game update: ${createdCategoryMeta.name}`);
       broadcastEvent('category:created', createdCategoryMeta);
@@ -678,6 +693,9 @@ app.put('/api/v1/games/:id', (req: Request, res: Response) => {
       isActive: Boolean(newIsActive),
       status: newStatus,
     });
+    if (!newIsActive) {
+      broadcastEvent('leaderboard:updated', { pruned: true });
+    }
 
     res.json({
       success: true,
@@ -710,8 +728,16 @@ app.patch('/api/v1/games/:id/status', (req: Request, res: Response) => {
       WHERE id = ?
     `).run(newActive, newStatus, id);
 
+    let prunedCount = 0;
+    if (!newActive) {
+      prunedCount = pruneInactiveLeaderboardScores();
+    }
+
     recordAudit('Admin', 'TOGGLE_GAME_STATUS', `Game "${existing.title}" diubah status menjadi: ${newActive ? 'Aktif' : 'Nonaktif'}`);
     broadcastEvent('game:updated', { id, title: existing.title, isActive: Boolean(newActive), status: newStatus });
+    if (prunedCount > 0) {
+      broadcastEvent('leaderboard:updated', { pruned: true });
+    }
 
     res.json({
       success: true,
@@ -734,8 +760,12 @@ app.delete('/api/v1/games/:id', (req: Request, res: Response) => {
     }
 
     db.prepare('DELETE FROM games WHERE id = ?').run(id);
+    db.prepare('DELETE FROM leaderboard WHERE game_id = ? OR LOWER(TRIM(game_title)) = LOWER(TRIM(?))').run(id, g.title);
+    pruneInactiveLeaderboardScores();
+
     recordAudit('Admin', 'DELETE_GAME', `Deleted game: ${g.title}`);
     broadcastEvent('game:deleted', { id, title: g.title });
+    broadcastEvent('leaderboard:updated', { deletedGame: g.title });
 
     res.json({ success: true, message: 'Permainan berhasil dihapus' });
   } catch (error) {
@@ -761,12 +791,24 @@ app.post('/api/v1/games/reset-stats', (req: Request, res: Response) => {
   }
 });
 
-// Real-Time Leaderboard
+// Real-Time Leaderboard (strictly active uploaded games)
 app.get('/api/v1/leaderboard', (_req: Request, res: Response) => {
   try {
+    pruneInactiveLeaderboardScores();
     const rows = db.prepare(`
-      SELECT * FROM leaderboard
-      ORDER BY score DESC, xp_earned DESC, id ASC
+      SELECT
+        l.*,
+        g.id AS resolved_game_id,
+        g.title AS resolved_game_title
+      FROM leaderboard l
+      INNER JOIN games g
+        ON (
+          (l.game_id IS NOT NULL AND l.game_id = g.id)
+          OR (l.game_id IS NULL AND LOWER(TRIM(l.game_title)) = LOWER(TRIM(g.title)))
+        )
+      WHERE g.is_active = 1
+        AND (g.status IS NULL OR g.status != 'inactive')
+      ORDER BY l.score DESC, l.xp_earned DESC, l.id DESC
       LIMIT 100
     `).all() as Record<string, unknown>[];
 
@@ -775,8 +817,8 @@ app.get('/api/v1/leaderboard', (_req: Request, res: Response) => {
       userName: r.user_name,
       userEmail: r.user_email,
       avatar: r.avatar,
-      gameId: r.game_id,
-      gameTitle: r.game_title,
+      gameId: r.resolved_game_id ?? r.game_id,
+      gameTitle: r.resolved_game_title || r.game_title,
       score: r.score,
       xpEarned: r.xp_earned,
       badge: r.badge,
@@ -799,7 +841,6 @@ app.post('/api/v1/leaderboard', (req: Request, res: Response) => {
       return;
     }
 
-    // Require completion verification
     if (isCompleted === false) {
       res.status(400).json({
         success: false,
@@ -808,23 +849,49 @@ app.post('/api/v1/leaderboard', (req: Request, res: Response) => {
       return;
     }
 
-    // Insert score
+    // Resolve against currently active game
+    const numericGameId = gameId ? Number(gameId) : null;
+    const matchedGame = (
+      numericGameId
+        ? db.prepare("SELECT id, title FROM games WHERE id = ? AND is_active = 1 AND (status IS NULL OR status != 'inactive')").get(numericGameId)
+        : db.prepare("SELECT id, title FROM games WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) AND is_active = 1 AND (status IS NULL OR status != 'inactive') LIMIT 1").get(String(gameTitle))
+    ) as { id: number; title: string } | undefined;
+
+    if (!matchedGame) {
+      res.status(400).json({
+        success: false,
+        message: 'Permainan sudah tidak aktif atau tidak ditemukan di katalog aktif.',
+      });
+      return;
+    }
+
+    const numericScore = Math.max(0, Math.round(Number(score) || 0));
+    const numericXp = xpEarned !== undefined ? Math.max(0, Math.round(Number(xpEarned) || 0)) : Math.round(numericScore * 0.5);
+
     const info = db.prepare(`
       INSERT INTO leaderboard (user_name, user_email, avatar, game_id, game_title, score, xp_earned, badge, school)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      userName.trim(),
+      String(userName).trim(),
       userEmail || null,
-      avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(userName)}`,
-      gameId || null,
-      gameTitle,
-      score,
-      xpEarned || Math.round(score * 0.5),
+      avatar || `https://api.dicebear.com/7.x/bottts/svg?seed=${encodeURIComponent(String(userName))}`,
+      matchedGame.id,
+      matchedGame.title,
+      numericScore,
+      numericXp,
       badge || 'Sahabat Pemula Dharma',
       school || 'Umum / Mandiri'
     );
 
-    // Update access log if provided
+    if (userEmail && numericXp > 0) {
+      try {
+        db.prepare('UPDATE users SET xp = xp + ?, updated_at = CURRENT_TIMESTAMP WHERE LOWER(email) = LOWER(?)')
+          .run(numericXp, String(userEmail).trim());
+      } catch {
+        // ignore if user row update fails
+      }
+    }
+
     if (accessLogId) {
       try {
         db.prepare('UPDATE game_access_logs SET completed = 1 WHERE id = ?').run(accessLogId);
@@ -833,14 +900,9 @@ app.post('/api/v1/leaderboard', (req: Request, res: Response) => {
       }
     }
 
-    // Increment player count in games table
-    if (gameId) {
-      db.prepare('UPDATE games SET players = players + 1 WHERE id = ?').run(gameId);
-    } else {
-      db.prepare('UPDATE games SET players = players + 1 WHERE title = ?').run(gameTitle);
-    }
+    db.prepare('UPDATE games SET players = players + 1 WHERE id = ?').run(matchedGame.id);
 
-    broadcastEvent('leaderboard:updated', { id: info.lastInsertRowid, userName, score });
+    broadcastEvent('leaderboard:updated', { id: info.lastInsertRowid, userName, gameTitle: matchedGame.title, score: numericScore });
 
     res.json({ success: true, message: 'Skor berhasil dicatat di Papan Peringkat!', id: info.lastInsertRowid });
   } catch (error) {
@@ -858,14 +920,21 @@ app.post('/api/v1/leaderboard/reset', (req: Request, res: Response) => {
       return;
     }
 
-    if (gameTitle && gameTitle.trim()) {
-      db.prepare('DELETE FROM leaderboard WHERE game_title = ?').run(gameTitle.trim());
-      recordAudit('Admin', 'RESET_LEADERBOARD_GAME', `Reset skor leaderboard untuk permainan: ${gameTitle}`);
+    if (gameTitle && String(gameTitle).trim()) {
+      const cleanTitle = String(gameTitle).trim();
+      const matched = db.prepare('SELECT id FROM games WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) LIMIT 1').get(cleanTitle) as { id: number } | undefined;
+      if (matched) {
+        db.prepare('DELETE FROM leaderboard WHERE game_id = ? OR LOWER(TRIM(game_title)) = LOWER(TRIM(?))').run(matched.id, cleanTitle);
+      } else {
+        db.prepare('DELETE FROM leaderboard WHERE LOWER(TRIM(game_title)) = LOWER(TRIM(?))').run(cleanTitle);
+      }
+      recordAudit('Admin', 'RESET_LEADERBOARD_GAME', `Reset skor leaderboard untuk permainan: ${cleanTitle}`);
     } else {
       db.prepare('DELETE FROM leaderboard').run();
       recordAudit('Admin', 'RESET_LEADERBOARD_ALL', 'Reset seluruh data skor leaderboard');
     }
 
+    pruneInactiveLeaderboardScores();
     broadcastEvent('leaderboard:updated', { reset: true, gameTitle: gameTitle || null });
     res.json({
       success: true,
@@ -1825,6 +1894,34 @@ function createDbSnapshotFile(targetPath: string) {
   try {
     db.exec(`VACUUM INTO '${escaped}'`);
   } catch {
+    try {
+      if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
+    } catch {
+      // ignore
+    }
+    try {
+      db.exec('REINDEX;');
+      db.exec(`VACUUM INTO '${escaped}'`);
+    } catch {
+      try {
+        if (fs.existsSync(targetPath)) fs.unlinkSync(targetPath);
+      } catch {
+        // ignore
+      }
+      try {
+        db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+      } catch {
+        // ignore
+      }
+      fs.copyFileSync(DB_PATH, targetPath);
+    }
+  }
+  if (!fs.existsSync(targetPath) || fs.statSync(targetPath).size <= 0) {
+    try {
+      db.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+    } catch {
+      // ignore
+    }
     fs.copyFileSync(DB_PATH, targetPath);
   }
 }
@@ -2014,15 +2111,39 @@ function executeNormalizedBackupImport(
       }
     }
 
-    // 2. Games (auto-synchronizes category and preserves thumbnail, icon, HTML5 code)
+    // 2. Games (auto-synchronizes category and preserves existing thumbnail, icon, HTML5 code in merge mode)
     for (const game of parsed.games) {
       const syncedCategory = ensureSynchronizedCategory(game.category, undefined, false);
       const existingGame = db
-        .prepare('SELECT id, players FROM games WHERE LOWER(title) = LOWER(?) AND LOWER(category) = LOWER(?)')
-        .get(game.title, syncedCategory) as { id: number; players: number } | undefined;
+        .prepare('SELECT id, players, thumbnail, icon, html5_code, url FROM games WHERE LOWER(title) = LOWER(?) AND LOWER(category) = LOWER(?)')
+        .get(game.title, syncedCategory) as {
+          id: number;
+          players: number;
+          thumbnail: string | null;
+          icon: string | null;
+          html5_code: string | null;
+          url: string | null;
+        } | undefined;
 
       if (existingGame) {
         const mergedPlayers = Math.max(Number(existingGame.players || 0), game.players);
+        const mergedThumbnail =
+          mode === 'merge'
+            ? (game.thumbnail && String(game.thumbnail).trim() ? game.thumbnail : String(existingGame.thumbnail || ''))
+            : game.thumbnail;
+        const mergedIcon =
+          mode === 'merge'
+            ? (game.icon && String(game.icon).trim() ? game.icon : String(existingGame.icon || ''))
+            : game.icon;
+        const mergedHtml5 =
+          mode === 'merge'
+            ? (game.html5Code || String(existingGame.html5_code || ''))
+            : game.html5Code;
+        const mergedUrl =
+          mode === 'merge'
+            ? (game.url || String(existingGame.url || ''))
+            : game.url;
+
         db.prepare(`
           UPDATE games
           SET slug = ?, difficulty = ?, type = ?, rating = ?, players = ?,
@@ -2035,13 +2156,13 @@ function executeNormalizedBackupImport(
           game.type,
           game.rating,
           mergedPlayers,
-          game.thumbnail,
-          game.icon,
+          mergedThumbnail,
+          mergedIcon,
           game.description,
           game.isPremium ? 1 : 0,
           game.isActive ? 1 : 0,
-          game.html5Code,
-          game.url,
+          mergedHtml5,
+          mergedUrl,
           game.status,
           game.featured ? 1 : 0,
           existingGame.id
@@ -2074,13 +2195,23 @@ function executeNormalizedBackupImport(
       }
     }
 
-    // 3. Site Settings (Banner, Hero Title/Subtitle, Logo Image, Announcement)
+    // 3. Site Settings (Banner, Hero Title/Subtitle, Logo Image, Announcement) - non-destructive in merge mode
+    const currentSettingRows = db.prepare('SELECT key, value FROM site_settings').all() as { key: string; value: string }[];
+    const currentSettingsObj: Record<string, string> = {};
+    for (const r of currentSettingRows) {
+      currentSettingsObj[r.key] = r.value;
+    }
+    const finalSettings = mergeExistingAndImportedSettings(
+      currentSettingsObj,
+      parsed.siteSettings,
+      mode
+    );
     const upsertSetting = db.prepare(`
       INSERT INTO site_settings (key, value, updated_at)
       VALUES (?, ?, CURRENT_TIMESTAMP)
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
     `);
-    for (const [k, v] of Object.entries(parsed.siteSettings)) {
+    for (const [k, v] of Object.entries(finalSettings)) {
       if (v !== undefined) {
         upsertSetting.run(k, String(v));
       }
@@ -2158,29 +2289,47 @@ function executeNormalizedBackupImport(
       }
     }
 
-    // 7. Leaderboard
+    // 7. Leaderboard (prune entries for non-active/deleted games)
     for (const lb of parsed.leaderboard) {
+      const matchedGame = db
+        .prepare("SELECT id, title FROM games WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) AND is_active = 1 AND (status IS NULL OR status != 'inactive') LIMIT 1")
+        .get(lb.gameTitle) as { id: number; title: string } | undefined;
+      if (!matchedGame) continue;
       const dup = db
-        .prepare('SELECT id FROM leaderboard WHERE LOWER(user_name) = LOWER(?) AND LOWER(game_title) = LOWER(?) AND score = ?')
-        .get(lb.userName, lb.gameTitle, lb.score);
+        .prepare('SELECT id FROM leaderboard WHERE LOWER(user_name) = LOWER(?) AND game_id = ? AND score = ?')
+        .get(lb.userName, matchedGame.id, lb.score);
       if (!dup) {
         db.prepare(`
-          INSERT INTO leaderboard (user_name, user_email, avatar, game_title, score, xp_earned, badge, school)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(lb.userName, lb.userEmail, lb.avatar, lb.gameTitle, lb.score, lb.xpEarned, lb.badge, lb.school);
+          INSERT INTO leaderboard (user_name, user_email, avatar, game_id, game_title, score, xp_earned, badge, school)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `).run(lb.userName, lb.userEmail, lb.avatar, matchedGame.id, matchedGame.title, lb.score, lb.xpEarned, lb.badge, lb.school);
       }
     }
+    pruneInactiveLeaderboardScores();
 
-    // 8. Users (preserve existing passwords; default 'dharma123' only for new imported user profiles)
+    // 8. Users (preserve existing passwords; never downgrade XP/level or wipe avatar/school in merge mode)
     for (const u of parsed.users) {
       const existingUser = db
-        .prepare('SELECT id FROM users WHERE id = ? OR LOWER(email) = LOWER(?)')
-        .get(u.id, u.email) as { id: string } | undefined;
+        .prepare('SELECT id, xp, level, badge, school, avatar FROM users WHERE id = ? OR LOWER(email) = LOWER(?)')
+        .get(u.id, u.email) as {
+          id: string;
+          xp: number;
+          level: number;
+          badge: string | null;
+          school: string | null;
+          avatar: string | null;
+        } | undefined;
       if (existingUser) {
+        const mergedXp = mode === 'merge' ? Math.max(Number(existingUser.xp || 0), u.xp) : u.xp;
+        const mergedLevel = mode === 'merge' ? Math.max(Number(existingUser.level || 1), u.level) : u.level;
+        const mergedAvatar = mode === 'merge' ? (u.avatar || String(existingUser.avatar || '')) : u.avatar;
+        const mergedSchool = mode === 'merge' ? (u.school || String(existingUser.school || '')) : u.school;
+        const mergedBadge = mode === 'merge' ? (u.badge || String(existingUser.badge || 'Sahabat Pemula Dharma')) : u.badge;
+
         db.prepare(`
           UPDATE users SET name = ?, avatar = ?, xp = ?, badge = ?, level = ?, school = ?, role = ?, updated_at = CURRENT_TIMESTAMP
           WHERE id = ?
-        `).run(u.name, u.avatar, u.xp, u.badge, u.level, u.school, u.role, existingUser.id);
+        `).run(u.name, mergedAvatar, mergedXp, mergedBadge, mergedLevel, mergedSchool, u.role, existingUser.id);
       } else {
         db.prepare(`
           INSERT INTO users (id, name, email, avatar, xp, badge, level, school, role, password)
@@ -2271,6 +2420,7 @@ app.get('/api/v1/backup/snapshots', (_req: Request, res: Response) => {
           createdAt: stats.mtime.toISOString(),
         };
       })
+      .filter((f) => f.sizeBytes > 0)
       .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
 
     res.json({ success: true, data: files });
@@ -2419,6 +2569,96 @@ app.post('/api/v1/backup/snapshots/:filename/restore', (req: Request, res: Respo
     });
   } catch (error) {
     res.status(400).json({ success: false, message: (error as Error).message });
+  }
+});
+
+// 9. Get Baseline Data Protection Status & Live Recorded Counts
+app.get('/api/v1/backup/baseline-status', (_req: Request, res: Response) => {
+  try {
+    ensureAutoBaselineSnapshotOnStartup();
+    const metaRows = db
+      .prepare("SELECT key, value FROM sync_metadata WHERE key IN ('baseline_protection', 'initial_seed_completed', 'baseline_established_at')")
+      .all() as { key: string; value: string }[];
+    const metaMap: Record<string, string> = {};
+    for (const r of metaRows) {
+      metaMap[r.key] = r.value;
+    }
+
+    let latestBaselineSnapshot: { filename: string; sizeBytes: number; createdAt: string } | null = null;
+    if (fs.existsSync(BACKUP_DIR)) {
+      const dbFiles = fs
+        .readdirSync(BACKUP_DIR)
+        .filter((f) => f.endsWith('.db'))
+        .map((filename) => {
+          const stats = fs.statSync(path.join(BACKUP_DIR, filename));
+          return {
+            filename,
+            sizeBytes: stats.size,
+            createdAt: stats.mtime.toISOString(),
+          };
+        })
+        .filter((f) => f.sizeBytes > 0)
+        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+
+      latestBaselineSnapshot =
+        dbFiles.find((f) => /^auto-baseline_.*\.db$/i.test(f.filename)) || dbFiles[0] || null;
+    }
+
+    res.json({
+      success: true,
+      data: {
+        protected: metaMap.baseline_protection === 'enabled',
+        initialSeedCompleted: metaMap.initial_seed_completed === '1',
+        baselineEstablishedAt: metaMap.baseline_established_at || null,
+        latestBaselineSnapshot,
+        counts: getBaselineDatabaseCounts(),
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: (error as Error).message });
+  }
+});
+
+// 10. Pull & Merge Backup From a Published Website URL
+app.post('/api/v1/backup/sync-from-url', async (req: Request, res: Response) => {
+  try {
+    const cleanUrl = validatePublishedSyncUrl(String(req.body?.sourceUrl || ''));
+    const mode = req.body?.mode === 'replace' ? 'replace' : 'merge';
+    const exportEndpoint = `${cleanUrl}/api/v1/backup/export`;
+
+    const resp = await fetch(exportEndpoint, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        'Cache-Control': 'no-cache',
+      },
+      signal: AbortSignal.timeout(15000),
+    });
+
+    const contentType = String(resp.headers.get('content-type') || '').toLowerCase();
+    if (!resp.ok || !contentType.includes('application/json')) {
+      res.status(400).json({
+        success: false,
+        message: `Gagal menarik data otomatis dari "${cleanUrl}" (HTTP ${resp.status} atau halaman memerlukan autentikasi browser). Silakan buka website terpublish di browser -> Admin Hub -> Tab Backup & Restore -> klik "Unduh Backup JSON" atau "Unduh File SQLite (.db)", lalu impor file tersebut di sini menggunakan Mode Gabungkan (Merge).`,
+      });
+      return;
+    }
+
+    const rawJson = (await resp.json()) as Record<string, unknown>;
+    const payloadCandidate = rawJson?.data && rawJson?.success === true ? rawJson.data : rawJson;
+    const parsed = parseBackupPayload(payloadCandidate);
+    const result = executeNormalizedBackupImport(parsed, mode, `Website Terpublish (${cleanUrl})`);
+
+    res.json({
+      success: true,
+      message: `Data dari website terpublish (${cleanUrl}) berhasil ditarik & ${mode === 'replace' ? 'dipulihkan' : 'digabungkan tanpa menghapus data lokal'}! (${result.imported.games} game, ${result.imported.categories} kategori, ${result.imported.users} pengguna)`,
+      mode,
+      safetySnapshot: result.safetySnapshot,
+      imported: result.imported,
+    });
+  } catch (error) {
+    const msg = (error as Error).message || 'Gagal menyinkronkan dari URL terpublish.';
+    res.status(400).json({ success: false, message: msg });
   }
 });
 

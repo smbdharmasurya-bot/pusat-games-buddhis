@@ -14,6 +14,7 @@ import {
   BackupImportMode,
   BackupSnapshotInfo,
   BackupSummary,
+  BaselineStatus,
 } from '../types';
 import {
   X,
@@ -42,6 +43,8 @@ import {
   RefreshCw,
   Flame,
   ShieldAlert,
+  ShieldCheck,
+  Link2,
   Sparkles,
   Database,
   FileJson,
@@ -68,6 +71,10 @@ import {
   parseBackupPayload,
   summarizeBackupPayload,
 } from '../utils/backupSync';
+import {
+  filterActiveGamesLeaderboard,
+  getResettableLeaderboardGameNames,
+} from '../utils/scoreAutoSync';
 
 interface AdminHubModalProps {
   isOpen: boolean;
@@ -224,6 +231,9 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
     snapshotFilename?: string;
     label: string;
   } | null>(null);
+  const [baselineStatus, setBaselineStatus] = React.useState<BaselineStatus | null>(null);
+  const [publishedSyncUrl, setPublishedSyncUrl] = React.useState('');
+  const [isSyncingPublished, setIsSyncingPublished] = React.useState(false);
 
   const showToast = React.useCallback((text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ text, type });
@@ -288,6 +298,22 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
     }
   }, []);
 
+  const activeLeaderboardList = React.useMemo(
+    () => filterActiveGamesLeaderboard(leaderboardList, games),
+    [leaderboardList, games]
+  );
+
+  const resettableGameNames = React.useMemo(
+    () => getResettableLeaderboardGameNames(games, activeLeaderboardList),
+    [games, activeLeaderboardList]
+  );
+
+  React.useEffect(() => {
+    if (selectedLeaderboardGame !== 'all' && !resettableGameNames.includes(selectedLeaderboardGame)) {
+      setSelectedLeaderboardGame('all');
+    }
+  }, [selectedLeaderboardGame, resettableGameNames]);
+
   const loadAnalytics = React.useCallback(async () => {
     try {
       setIsLoadingAnalytics(true);
@@ -306,8 +332,14 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
 
   const loadBackupSnapshots = React.useCallback(async () => {
     try {
-      const list = await api.getBackupSnapshots();
+      const [list, status] = await Promise.all([
+        api.getBackupSnapshots(),
+        api.getBaselineStatus().catch(() => null),
+      ]);
       setBackupSnapshots(list);
+      if (status) {
+        setBaselineStatus(status);
+      }
     } catch (err) {
       console.warn('Failed loading backup snapshots:', err);
     }
@@ -1064,6 +1096,27 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
     }
   };
 
+  const handleSyncFromPublishedUrl = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!publishedSyncUrl.trim()) {
+      showToast('Masukkan URL website yang sudah terpublish terlebih dahulu.', 'error');
+      return;
+    }
+    try {
+      setIsSyncingPublished(true);
+      const res = await api.syncFromPublishedUrl(publishedSyncUrl.trim(), 'merge');
+      playCorrectSound();
+      await loadBackupSnapshots();
+      onDataChanged();
+      showToast(res.message);
+    } catch (err) {
+      playIncorrectSound();
+      showToast((err as Error).message, 'error');
+    } finally {
+      setIsSyncingPublished(false);
+    }
+  };
+
   const handleBackupJsonTextChange = (text: string) => {
     setBackupInputKind('json');
     setBackupDbBase64('');
@@ -1443,7 +1496,7 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
                     }`}
                   >
                     <Trophy className="w-3.5 h-3.5" />
-                    <span>Reset & Kelola Skor ({leaderboardList.length})</span>
+                    <span>Reset & Kelola Skor ({activeLeaderboardList.length})</span>
                   </button>
 
                   <button
@@ -3459,7 +3512,7 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
                     <div className="bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-900/50 p-4 rounded-2xl flex items-center justify-between">
                       <div>
                         <div className="text-[11px] font-bold text-amber-700 dark:text-amber-400 uppercase tracking-wider">Total Skor Tercatat</div>
-                        <div className="text-2xl font-black text-amber-900 dark:text-amber-200 font-mono mt-0.5">{leaderboardList.length}</div>
+                        <div className="text-2xl font-black text-amber-900 dark:text-amber-200 font-mono mt-0.5">{activeLeaderboardList.length}</div>
                       </div>
                       <div className="w-10 h-10 rounded-xl bg-amber-500/20 text-amber-600 flex items-center justify-center font-bold">
                         <Trophy className="w-5 h-5" />
@@ -3470,7 +3523,7 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
                       <div>
                         <div className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400 uppercase tracking-wider">Skor Tertinggi</div>
                         <div className="text-2xl font-black text-emerald-900 dark:text-emerald-200 font-mono mt-0.5">
-                          {leaderboardList.length > 0 ? Math.max(...leaderboardList.map(l => l.score)) : 0}
+                          {activeLeaderboardList.length > 0 ? Math.max(...activeLeaderboardList.map(l => l.score)) : 0}
                         </div>
                       </div>
                       <div className="w-10 h-10 rounded-xl bg-emerald-500/20 text-emerald-600 flex items-center justify-center font-bold">
@@ -3482,7 +3535,7 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
                       <div>
                         <div className="text-[11px] font-bold text-purple-700 dark:text-purple-400 uppercase tracking-wider">Total XP Diberikan</div>
                         <div className="text-2xl font-black text-purple-900 dark:text-purple-200 font-mono mt-0.5">
-                          {leaderboardList.reduce((acc, l) => acc + l.xpEarned, 0).toLocaleString()}
+                          {activeLeaderboardList.reduce((acc, l) => acc + l.xpEarned, 0).toLocaleString()}
                         </div>
                       </div>
                       <div className="w-10 h-10 rounded-xl bg-purple-500/20 text-purple-600 flex items-center justify-center font-bold">
@@ -3508,10 +3561,11 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
                       <select
                         value={selectedLeaderboardGame}
                         onChange={(e) => setSelectedLeaderboardGame(e.target.value)}
+                        aria-label="Filter Permainan Skor"
                         className="py-2 px-3 rounded-xl bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 text-xs text-slate-900 dark:text-white outline-none focus:ring-2 focus:ring-amber-500 cursor-pointer"
                       >
-                        <option value="all">Semua Permainan</option>
-                        {Array.from(new Set(leaderboardList.map(l => l.gameTitle))).map(gt => (
+                        <option value="all">Semua Permainan Aktif ({resettableGameNames.length})</option>
+                        {resettableGameNames.map(gt => (
                           <option key={gt} value={gt}>{gt}</option>
                         ))}
                       </select>
@@ -3557,7 +3611,7 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
-                          {leaderboardList
+                          {activeLeaderboardList
                             .filter(l => {
                               const matchGame = selectedLeaderboardGame === 'all' || l.gameTitle === selectedLeaderboardGame;
                               const matchSearch = !leaderboardSearch || 
@@ -3615,10 +3669,10 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
                                 </td>
                               </tr>
                             ))}
-                          {leaderboardList.length === 0 && (
+                          {activeLeaderboardList.length === 0 && (
                             <tr>
                               <td colSpan={8} className="py-8 text-center text-slate-400">
-                                Belum ada skor yang tercatat di papan peringkat.
+                                Belum ada skor yang tercatat untuk permainan aktif saat ini.
                               </td>
                             </tr>
                           )}
@@ -3976,6 +4030,114 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
               {/* TAB 11: BACKUP & RESTORE */}
               {activeTab === 'backup' && (
                 <div className="space-y-6">
+                  {/* Section 0: Baseline Data Protection & Published Sync */}
+                  <div className="bg-emerald-50/70 dark:bg-emerald-950/20 p-5 rounded-3xl border border-emerald-200 dark:border-emerald-900/60 space-y-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <h4 className="font-heading font-bold text-sm text-slate-900 dark:text-white flex items-center gap-2">
+                            <ShieldCheck className="w-4 h-4 text-emerald-600" />
+                            <span>Perlindungan Baseline Data Terpublish</span>
+                          </h4>
+                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-bold border ${
+                            baselineStatus?.protected
+                              ? 'bg-emerald-600 text-white border-emerald-600'
+                              : 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-900/40 dark:text-amber-300'
+                          }`}>
+                            {baselineStatus?.protected ? 'Perlindungan Baseline Aktif' : 'Memeriksa Baseline...'}
+                          </span>
+                        </div>
+                        <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-1 max-w-3xl">
+                          Seluruh data yang sudah terekam di database (game, kategori, pengguna & XP, skor leaderboard, sertifikat, testimoni, lisensi, pengaturan tampilan, dan log akses) dikunci sebagai baseline agar tidak pernah terhapus atau tertimpa ulang saat ada pengembangan kode atau pembaruan server.
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={loadBackupSnapshots}
+                        className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100/60 text-xs font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-1 cursor-pointer transition"
+                      >
+                        <RefreshCw className="w-3 h-3" />
+                        <span>Perbarui Status</span>
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                      <div className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800">
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Game</div>
+                        <div className="text-base font-black text-amber-600 font-mono">{baselineStatus?.counts.games ?? games.length}</div>
+                      </div>
+                      <div className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800">
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Kategori</div>
+                        <div className="text-base font-black text-emerald-600 font-mono">{baselineStatus?.counts.categories ?? categories.length}</div>
+                      </div>
+                      <div className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800">
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Pengguna</div>
+                        <div className="text-base font-black text-indigo-600 font-mono">{baselineStatus?.counts.users ?? '-'}</div>
+                      </div>
+                      <div className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800">
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Skor</div>
+                        <div className="text-base font-black text-orange-600 font-mono">{baselineStatus?.counts.leaderboard ?? '-'}</div>
+                      </div>
+                      <div className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800">
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Sertifikat</div>
+                        <div className="text-base font-black text-sky-600 font-mono">{baselineStatus?.counts.certificates ?? certificates.length}</div>
+                      </div>
+                      <div className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800">
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Testimoni</div>
+                        <div className="text-base font-black text-purple-600 font-mono">{baselineStatus?.counts.testimonials ?? testimonials.length}</div>
+                      </div>
+                      <div className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800">
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Log Akses</div>
+                        <div className="text-base font-black text-slate-700 dark:text-slate-200 font-mono">{baselineStatus?.counts.accessLogs ?? '-'}</div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-600 dark:text-slate-300 bg-white/80 dark:bg-slate-900/70 px-3.5 py-2.5 rounded-2xl border border-emerald-100 dark:border-slate-800">
+                      <div>
+                        <span className="font-semibold">Snapshot Baseline Terbaru:</span>{' '}
+                        <span className="font-mono text-emerald-700 dark:text-emerald-300">
+                          {baselineStatus?.latestBaselineSnapshot?.filename || 'Otomatis dibuat saat ada data terekam'}
+                        </span>
+                      </div>
+                      {baselineStatus?.baselineEstablishedAt && (
+                        <div>
+                          <span className="font-semibold">Baseline Aktif Sejak:</span>{' '}
+                          <span className="font-mono">{new Date(baselineStatus.baselineEstablishedAt).toLocaleString('id-ID')}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <form onSubmit={handleSyncFromPublishedUrl} className="pt-1 space-y-2">
+                      <label htmlFor="published-sync-url" className="block text-[11px] font-bold uppercase text-slate-600 dark:text-slate-300">
+                        Tarik &amp; Gabungkan Data dari Website Terpublish (Mode Aman / Tanpa Menghapus Data Lokal)
+                      </label>
+                      <div className="flex flex-col sm:flex-row gap-2">
+                        <div className="relative flex-grow">
+                          <Link2 className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                          <input
+                            id="published-sync-url"
+                            type="url"
+                            value={publishedSyncUrl}
+                            onChange={(e) => setPublishedSyncUrl(e.target.value)}
+                            placeholder="https://ais-pre-xxxx.run.app"
+                            className="w-full pl-9 pr-3 py-2.5 rounded-xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-slate-700 text-xs font-mono text-slate-800 dark:text-slate-100 focus:ring-2 focus:ring-emerald-500 outline-none"
+                          />
+                        </div>
+                        <button
+                          type="submit"
+                          disabled={isSyncingPublished || !publishedSyncUrl.trim()}
+                          className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold shadow flex items-center justify-center gap-1.5 transition cursor-pointer disabled:opacity-50 shrink-0"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${isSyncingPublished ? 'animate-spin' : ''}`} />
+                          <span>{isSyncingPublished ? 'Menarik Data...' : 'Tarik & Gabungkan Data'}</span>
+                        </button>
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400">
+                        Jika URL terpublish dilindungi login browser, unduh berkas <code className="font-mono">.json</code> atau <code className="font-mono">.db</code> dari Admin Hub website terpublish lalu impor di Bagian Import dengan <strong>Mode Gabungkan (Merge — Aman)</strong>.
+                      </p>
+                    </form>
+                  </div>
+
                   {/* Section 1: Export Backup */}
                   <div className="bg-white dark:bg-slate-900 p-5 rounded-3xl border border-slate-200 dark:border-slate-800 space-y-4">
                     <div className="flex flex-wrap items-start justify-between gap-4">

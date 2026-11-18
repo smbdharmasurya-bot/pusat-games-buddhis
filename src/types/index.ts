@@ -200,3 +200,20 @@ export interface BackupImportResult {
   imported: BackupSummary;
 }
 
+export interface BaselineStatus {
+  protected: boolean;
+  initialSeedCompleted: boolean;
+  baselineEstablishedAt: string | null;
+  latestBaselineSnapshot: BackupSnapshotInfo | null;
+  counts: {
+    games: number;
+    categories: number;
+    leaderboard: number;
+    users: number;
+    certificates: number;
+    testimonials: number;
+    licenses: number;
+    accessLogs: number;
+  };
+}
+
