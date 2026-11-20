@@ -2,7 +2,12 @@ import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  AUTO_BASELINE_SYNC_INTERVAL_MS,
+  AUTO_BASELINE_SYNC_INTERVAL_SECONDS,
+  DEFAULT_PUBLISHED_SYNC_URL,
+  hasSnapshotGrownBeyondCurrentBaseline,
   selectAutoBaselineSnapshotsToDelete,
+  shouldCreateAutoBaselineSnapshot,
   shouldRunInitialSeed,
 } from '../utils/baselineProtection.ts';
 import { formatSnapshotTimestamp } from '../utils/backupSync.ts';
@@ -825,8 +830,29 @@ export function getBaselineDatabaseCounts() {
   };
 }
 
-export function ensureAutoBaselineSnapshotOnStartup(): string | null {
+export function upsertSyncMetadata(key: string, value: string): void {
+  db.prepare(`
+    INSERT INTO sync_metadata (key, value, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+  `).run(key, value);
+}
+
+export function getSyncMetadataValue(key: string): string | null {
+  const row = db
+    .prepare('SELECT value FROM sync_metadata WHERE key = ?')
+    .get(key) as { value?: string } | undefined;
+  return row?.value ?? null;
+}
+
+export function ensureAutoBaselineSnapshotOnStartup(
+  forceCreate: boolean = false,
+  growthReason?: string
+): string | null {
   try {
+    if (growthReason && growthReason.trim()) {
+      upsertSyncMetadata('baseline_last_growth_reason', growthReason.trim());
+    }
     const counts = getBaselineDatabaseCounts();
     const hasRecordedData =
       counts.games > 0 ||
@@ -837,7 +863,14 @@ export function ensureAutoBaselineSnapshotOnStartup(): string | null {
       counts.accessLogs > 0 ||
       counts.users > 4;
 
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const currentRevision = Number(getSyncMetadataValue('data_revision') || 1);
+    const lastSyncedRevisionRaw = getSyncMetadataValue('baseline_last_synced_revision');
+    const lastSyncedRevision = lastSyncedRevisionRaw !== null ? Number(lastSyncedRevisionRaw) : null;
+
     if (!hasRecordedData) {
+      upsertSyncMetadata('baseline_last_synced_at', nowIso);
       return null;
     }
 
@@ -845,8 +878,9 @@ export function ensureAutoBaselineSnapshotOnStartup(): string | null {
       ? fs.readdirSync(BACKUP_DIR).filter((f) => /^auto-baseline_.*\.db$/i.test(f))
       : [];
 
-    const ONE_HOUR_MS = 60 * 60 * 1000;
-    const now = Date.now();
+    let newestFile: string | null = null;
+    let newestMtimeMs = 0;
+
     for (const file of existingFiles) {
       const full = path.join(BACKUP_DIR, file);
       const stat = fs.statSync(full);
@@ -858,14 +892,35 @@ export function ensureAutoBaselineSnapshotOnStartup(): string | null {
         }
         continue;
       }
-      if (now - stat.mtimeMs < ONE_HOUR_MS) {
-        return file;
+      if (stat.mtimeMs > newestMtimeMs) {
+        newestMtimeMs = stat.mtimeMs;
+        newestFile = file;
       }
     }
 
-    const filename = `auto-baseline_${formatSnapshotTimestamp()}.db`;
+    const needsNewSnapshot = shouldCreateAutoBaselineSnapshot({
+      lastSnapshotMtimeMs: newestMtimeMs,
+      nowMs,
+      lastSyncedRevision,
+      currentRevision,
+      intervalMs: AUTO_BASELINE_SYNC_INTERVAL_MS,
+      forceCreate,
+    });
+
+    if (!needsNewSnapshot && newestFile) {
+      upsertSyncMetadata('baseline_last_synced_at', nowIso);
+      upsertSyncMetadata('baseline_last_synced_revision', String(currentRevision));
+      return newestFile;
+    }
+
+    const filename = `auto-baseline_${formatSnapshotTimestamp(new Date(nowMs))}.db`;
     const destPath = path.join(BACKUP_DIR, filename);
     const escapedPath = destPath.replace(/'/g, "''");
+    try {
+      db.exec('PRAGMA wal_checkpoint(PASSIVE);');
+    } catch {
+      // ignore
+    }
     try {
       db.exec(`VACUUM INTO '${escapedPath}'`);
     } catch {
@@ -910,6 +965,9 @@ export function ensureAutoBaselineSnapshotOnStartup(): string | null {
       }
     }
 
+    upsertSyncMetadata('baseline_last_synced_at', nowIso);
+    upsertSyncMetadata('baseline_last_synced_revision', String(currentRevision));
+
     return filename;
   } catch (err) {
     console.warn('Auto-baseline snapshot skipped:', (err as Error).message);
@@ -917,10 +975,268 @@ export function ensureAutoBaselineSnapshotOnStartup(): string | null {
   }
 }
 
+export function getBaselineGrowthMetrics() {
+  const totalGamePlays = Number(
+    (
+      db
+        .prepare("SELECT SUM(players) as s FROM games WHERE is_active = 1 AND (status IS NULL OR status != 'inactive')")
+        .get() as { s: number | null } | undefined
+    )?.s || 0
+  );
+  const totalAccessSessions = Number(
+    (db.prepare('SELECT COUNT(*) as c FROM game_access_logs').get() as { c: number } | undefined)?.c || 0
+  );
+  const uniqueCountries = Number(
+    (db.prepare('SELECT COUNT(DISTINCT country) as c FROM game_access_logs').get() as { c: number } | undefined)?.c || 0
+  );
+  const uniqueIps = Number(
+    (db.prepare('SELECT COUNT(DISTINCT ip_address) as c FROM game_access_logs').get() as { c: number } | undefined)?.c || 0
+  );
+  const countriesList = db
+    .prepare(`
+      SELECT country as name, country_code as code, COUNT(*) as count
+      FROM game_access_logs
+      GROUP BY country, country_code
+      ORDER BY count DESC
+      LIMIT 12
+    `)
+    .all() as { name: string; code: string; count: number }[];
+  const lastGameUpdatedAt =
+    (
+      db
+        .prepare("SELECT MAX(updated_at) as m FROM games WHERE is_active = 1 AND (status IS NULL OR status != 'inactive')")
+        .get() as { m: string | null } | undefined
+    )?.m || null;
+  const lastAccessAt =
+    (db.prepare('SELECT MAX(created_at) as m FROM game_access_logs').get() as { m: string | null } | undefined)?.m || null;
+
+  return {
+    totalGamePlays,
+    totalAccessSessions,
+    uniqueCountries,
+    uniqueIps,
+    countriesList,
+    lastGameUpdatedAt,
+    lastAccessAt,
+  };
+}
+
+export function getBaselineStatusPayload() {
+  const metaRows = db
+    .prepare(
+      "SELECT key, value FROM sync_metadata WHERE key IN ('baseline_protection', 'initial_seed_completed', 'baseline_established_at', 'baseline_last_synced_at', 'baseline_auto_sync_enabled', 'published_sync_url', 'data_revision', 'baseline_last_growth_reason')"
+    )
+    .all() as { key: string; value: string }[];
+  const metaMap: Record<string, string> = {};
+  for (const r of metaRows) {
+    metaMap[r.key] = r.value;
+  }
+
+  let latestBaselineSnapshot: { filename: string; sizeBytes: number; createdAt: string } | null = null;
+  if (fs.existsSync(BACKUP_DIR)) {
+    const dbFiles = fs
+      .readdirSync(BACKUP_DIR)
+      .filter((f) => f.endsWith('.db'))
+      .map((filename) => {
+        const stats = fs.statSync(path.join(BACKUP_DIR, filename));
+        return {
+          filename,
+          sizeBytes: stats.size,
+          createdAt: stats.mtime.toISOString(),
+        };
+      })
+      .filter((f) => f.sizeBytes > 0)
+      .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+
+    latestBaselineSnapshot =
+      dbFiles.find((f) => /^auto-baseline_.*\.db$/i.test(f.filename)) || dbFiles[0] || null;
+  }
+
+  const lastAutoSyncAt = metaMap.baseline_last_synced_at || latestBaselineSnapshot?.createdAt || new Date().toISOString();
+  const lastSyncMs = Date.parse(lastAutoSyncAt);
+  const nextAutoSyncAt = Number.isFinite(lastSyncMs)
+    ? new Date(lastSyncMs + AUTO_BASELINE_SYNC_INTERVAL_MS).toISOString()
+    : new Date(Date.now() + AUTO_BASELINE_SYNC_INTERVAL_MS).toISOString();
+  const baselineRevision = Number(metaMap.data_revision || 1);
+
+  return {
+    protected: metaMap.baseline_protection === 'enabled',
+    initialSeedCompleted: metaMap.initial_seed_completed === '1',
+    baselineEstablishedAt: metaMap.baseline_established_at || null,
+    latestBaselineSnapshot,
+    autoSyncEnabled: metaMap.baseline_auto_sync_enabled !== '0',
+    autoSyncIntervalSeconds: AUTO_BASELINE_SYNC_INTERVAL_SECONDS,
+    lastAutoSyncAt,
+    nextAutoSyncAt,
+    publishedSyncUrl: metaMap.published_sync_url || DEFAULT_PUBLISHED_SYNC_URL,
+    baselineRevision: Number.isFinite(baselineRevision) && baselineRevision > 0 ? baselineRevision : 1,
+    lastGrowthReason:
+      metaMap.baseline_last_growth_reason || 'Baseline Berkembang Sesuai Akses Pengguna & Pembaruan Game',
+    growthMetrics: getBaselineGrowthMetrics(),
+    counts: getBaselineDatabaseCounts(),
+  };
+}
+
+function reconcileGrowingBaselineOnStartup(): void {
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) return;
+    const autoSnapshots = fs
+      .readdirSync(BACKUP_DIR)
+      .filter((f) => /^auto-baseline_.*\.db$/i.test(f))
+      .map((name) => {
+        const fullPath = path.join(BACKUP_DIR, name);
+        const stat = fs.statSync(fullPath);
+        return { name, fullPath, size: stat.size, mtimeMs: stat.mtimeMs };
+      })
+      .filter((f) => f.size > 0)
+      .sort((a, b) => b.mtimeMs - a.mtimeMs);
+
+    if (autoSnapshots.length === 0) return;
+
+    const currentCounts = getBaselineDatabaseCounts();
+    const currentTotalPlayers = Number(
+      (db.prepare('SELECT SUM(players) as s FROM games').get() as { s: number | null } | undefined)?.s || 0
+    );
+    const currentRevision = Number(getSyncMetadataValue('data_revision') || 1);
+
+    const latestSnapPath = autoSnapshots[0].fullPath;
+    const snapDb = new DatabaseSync(latestSnapPath, { readOnly: true });
+    try {
+      const snapGamesCount = Number((snapDb.prepare('SELECT COUNT(*) as c FROM games').get() as { c: number } | undefined)?.c || 0);
+      const snapTotalPlayers = Number((snapDb.prepare('SELECT SUM(players) as s FROM games').get() as { s: number | null } | undefined)?.s || 0);
+      const snapCategoriesCount = Number((snapDb.prepare('SELECT COUNT(*) as c FROM categories').get() as { c: number } | undefined)?.c || 0);
+      const snapLeaderboardCount = Number((snapDb.prepare('SELECT COUNT(*) as c FROM leaderboard').get() as { c: number } | undefined)?.c || 0);
+      const snapUsersCount = Number((snapDb.prepare('SELECT COUNT(*) as c FROM users').get() as { c: number } | undefined)?.c || 0);
+      const snapTestimonialsCount = Number((snapDb.prepare('SELECT COUNT(*) as c FROM testimonials').get() as { c: number } | undefined)?.c || 0);
+      const snapCertificatesCount = Number((snapDb.prepare('SELECT COUNT(*) as c FROM certificates').get() as { c: number } | undefined)?.c || 0);
+      const snapAccessLogsCount = Number((snapDb.prepare('SELECT COUNT(*) as c FROM game_access_logs').get() as { c: number } | undefined)?.c || 0);
+      const snapRevisionRow = snapDb
+        .prepare("SELECT value FROM sync_metadata WHERE key = 'data_revision'")
+        .get() as { value?: string } | undefined;
+      const snapRevision = Number(snapRevisionRow?.value || 1);
+
+      const hasGrown = hasSnapshotGrownBeyondCurrentBaseline(
+        {
+          games: currentCounts.games,
+          totalPlayers: currentTotalPlayers,
+          categories: currentCounts.categories,
+          leaderboard: currentCounts.leaderboard,
+          users: currentCounts.users,
+          testimonials: currentCounts.testimonials,
+          certificates: currentCounts.certificates,
+          accessLogs: currentCounts.accessLogs,
+          revision: currentRevision,
+        },
+        {
+          games: snapGamesCount,
+          totalPlayers: snapTotalPlayers,
+          categories: snapCategoriesCount,
+          leaderboard: snapLeaderboardCount,
+          users: snapUsersCount,
+          testimonials: snapTestimonialsCount,
+          certificates: snapCertificatesCount,
+          accessLogs: snapAccessLogsCount,
+          revision: snapRevision,
+        }
+      );
+
+      if (!hasGrown) return;
+
+      // Merge forward grown game player counts & any newer games
+      const snapGames = snapDb.prepare('SELECT * FROM games').all() as Record<string, unknown>[];
+      for (const sg of snapGames) {
+        const existingGame = db
+          .prepare('SELECT id, players, updated_at FROM games WHERE LOWER(TRIM(title)) = LOWER(TRIM(?))')
+          .get(String(sg.title || '')) as { id: number; players: number; updated_at: string | null } | undefined;
+        if (existingGame) {
+          const maxPlayers = Math.max(Number(existingGame.players || 0), Number(sg.players || 0));
+          if (maxPlayers > Number(existingGame.players || 0)) {
+            db.prepare('UPDATE games SET players = ? WHERE id = ?').run(maxPlayers, existingGame.id);
+          }
+        } else if (sg.title) {
+          db.prepare(`
+            INSERT INTO games (
+              title, slug, category, difficulty, type, rating, players,
+              thumbnail, icon, description, is_premium, is_active, html5_code, url, status, featured
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            String(sg.title),
+            String(sg.slug || 'game'),
+            String(sg.category || 'Umum'),
+            String(sg.difficulty || 'Mudah'),
+            String(sg.type || 'html5'),
+            Number(sg.rating ?? 4.9),
+            Number(sg.players ?? 0),
+            (sg.thumbnail as string | null) ?? '',
+            (sg.icon as string | null) ?? '',
+            String(sg.description || ''),
+            Number(sg.is_premium ?? 0),
+            Number(sg.is_active ?? 1),
+            (sg.html5_code as string | null) ?? null,
+            (sg.url as string | null) ?? null,
+            String(sg.status || 'published'),
+            Number(sg.featured ?? 0)
+          );
+        }
+      }
+
+      // Merge forward grown real access logs
+      const snapAccessLogs = snapDb.prepare('SELECT * FROM game_access_logs').all() as Record<string, unknown>[];
+      for (const sal of snapAccessLogs) {
+        const dup = db
+          .prepare(
+            'SELECT id FROM game_access_logs WHERE LOWER(TRIM(user_name)) = LOWER(TRIM(?)) AND LOWER(TRIM(game_title)) = LOWER(TRIM(?)) AND created_at = ?'
+          )
+          .get(String(sal.user_name || ''), String(sal.game_title || ''), String(sal.created_at || ''));
+        if (!dup && sal.game_title && sal.user_name) {
+          db.prepare(`
+            INSERT INTO game_access_logs (
+              game_id, game_title, game_category, user_id, user_name, user_role,
+              ip_address, device_type, device_model, browser, os, screen_resolution,
+              country, country_code, city, user_agent, duration_seconds, completed, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            (sal.game_id as number | null) ?? null,
+            String(sal.game_title),
+            (sal.game_category as string | null) ?? 'Umum',
+            (sal.user_id as string | null) ?? null,
+            String(sal.user_name),
+            String(sal.user_role || 'tamu'),
+            String(sal.ip_address || '127.0.0.1'),
+            String(sal.device_type || 'Desktop PC'),
+            String(sal.device_model || 'Desktop PC'),
+            String(sal.browser || 'Browser Web'),
+            String(sal.os || 'OS'),
+            (sal.screen_resolution as string | null) ?? null,
+            String(sal.country || 'Indonesia'),
+            String(sal.country_code || 'ID'),
+            String(sal.city || 'Nusantara'),
+            String(sal.user_agent || ''),
+            Number(sal.duration_seconds || 0),
+            Number(sal.completed ? 1 : 0),
+            String(sal.created_at || new Date().toISOString())
+          );
+        }
+      }
+
+      if (snapRevision > currentRevision) {
+        upsertSyncMetadata('data_revision', String(snapRevision));
+      }
+    } finally {
+      snapDb.close();
+    }
+  } catch (err) {
+    console.warn('Baseline forward reconciliation skipped:', (err as Error).message);
+  }
+}
+
 // Non-destructive database initialization & baseline preservation
 function seedDatabase() {
   // Self-heal any corrupted B-tree pages in game_access_logs while preserving all valid records
   healMalformedAccessLogsIfNeeded();
+
+  // Merge forward any grown records from the latest auto-baseline snapshot so the baseline never regresses
+  reconcileGrowingBaselineOnStartup();
 
   // Prune stale leaderboard entries for non-active/deleted games while preserving all active game records
   pruneInactiveLeaderboardScores();
@@ -1104,6 +1420,10 @@ function seedDatabase() {
   db.prepare("INSERT OR IGNORE INTO sync_metadata (key, value) VALUES ('initial_seed_completed', '1')").run();
   db.prepare("INSERT OR IGNORE INTO sync_metadata (key, value) VALUES ('baseline_protection', 'enabled')").run();
   db.prepare("INSERT OR IGNORE INTO sync_metadata (key, value) VALUES ('baseline_established_at', ?)").run(new Date().toISOString());
+  db.prepare("INSERT OR IGNORE INTO sync_metadata (key, value) VALUES ('baseline_auto_sync_enabled', '1')").run();
+  db.prepare("INSERT OR IGNORE INTO sync_metadata (key, value) VALUES ('published_sync_url', ?)").run(
+    process.env.PUBLISHED_APP_URL || DEFAULT_PUBLISHED_SYNC_URL
+  );
 
   ensureAutoBaselineSnapshotOnStartup();
 }

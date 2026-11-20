@@ -23,6 +23,7 @@ export const REALTIME_SYNC_EVENTS = [
   'user:updated',
   'user:deleted',
   'backup:imported',
+  'baseline:synced',
 ] as const;
 
 export type RealtimeSyncEvent = (typeof REALTIME_SYNC_EVENTS)[number];

@@ -104,6 +104,252 @@ const DUMMY_AUDIT_DETAILS_PATTERNS: RegExp[] = [
   /from game upload:\s*(Sila & Etika|Etika Dharma|Dharma Dasar)/i,
 ];
 
+export const PORTAL_VISIT_GAME_TITLE = 'Portal Website Pusat Games Buddhis';
+export const PORTAL_VISIT_CATEGORY = 'Akses Portal Global';
+
+export interface WorldwideLocationInput {
+  countryHeader?: string | null;
+  cityHeader?: string | null;
+  timezone?: string | null;
+  acceptLanguage?: string | null;
+}
+
+export interface WorldwideLocationResult {
+  country: string;
+  code: string;
+  city: string;
+}
+
+const WORLD_COUNTRY_NAMES_ID: Record<string, string> = {
+  ID: 'Indonesia',
+  SG: 'Singapura',
+  MY: 'Malaysia',
+  TH: 'Thailand',
+  VN: 'Vietnam',
+  PH: 'Filipina',
+  MM: 'Myanmar',
+  KH: 'Kamboja',
+  LA: 'Laos',
+  BN: 'Brunei Darussalam',
+  TL: 'Timor Leste',
+  JP: 'Jepang',
+  KR: 'Korea Selatan',
+  TW: 'Taiwan',
+  HK: 'Hong Kong',
+  MO: 'Makau',
+  CN: 'Tiongkok',
+  IN: 'India',
+  LK: 'Sri Lanka',
+  NP: 'Nepal',
+  BT: 'Bhutan',
+  BD: 'Bangladesh',
+  PK: 'Pakistan',
+  AU: 'Australia',
+  NZ: 'Selandia Baru',
+  US: 'Amerika Serikat',
+  CA: 'Kanada',
+  MX: 'Meksiko',
+  BR: 'Brasil',
+  AR: 'Argentina',
+  CL: 'Chili',
+  CO: 'Kolombia',
+  PE: 'Peru',
+  GB: 'Inggris (UK)',
+  DE: 'Jerman',
+  FR: 'Prancis',
+  NL: 'Belanda',
+  BE: 'Belgia',
+  CH: 'Swiss',
+  AT: 'Austria',
+  IT: 'Italia',
+  ES: 'Spanyol',
+  PT: 'Portugal',
+  SE: 'Swedia',
+  NO: 'Norwegia',
+  DK: 'Denmark',
+  FI: 'Finlandia',
+  PL: 'Polandia',
+  CZ: 'Ceko',
+  RU: 'Rusia',
+  TR: 'Turki',
+  AE: 'Uni Emirat Arab',
+  SA: 'Arab Saudi',
+  QA: 'Qatar',
+  IL: 'Israel',
+  EG: 'Mesir',
+  ZA: 'Afrika Selatan',
+  NG: 'Nigeria',
+  KE: 'Kenya',
+};
+
+const TIMEZONE_TO_LOCATION: Record<string, { code: string; city: string }> = {
+  'Asia/Jakarta': { code: 'ID', city: 'Jakarta' },
+  'Asia/Pontianak': { code: 'ID', city: 'Pontianak' },
+  'Asia/Makassar': { code: 'ID', city: 'Makassar' },
+  'Asia/Ujung_Pandang': { code: 'ID', city: 'Makassar' },
+  'Asia/Jayapura': { code: 'ID', city: 'Jayapura' },
+  'Asia/Singapore': { code: 'SG', city: 'Singapore' },
+  'Asia/Kuala_Lumpur': { code: 'MY', city: 'Kuala Lumpur' },
+  'Asia/Kuching': { code: 'MY', city: 'Kuching' },
+  'Asia/Bangkok': { code: 'TH', city: 'Bangkok' },
+  'Asia/Ho_Chi_Minh': { code: 'VN', city: 'Ho Chi Minh City' },
+  'Asia/Saigon': { code: 'VN', city: 'Ho Chi Minh City' },
+  'Asia/Manila': { code: 'PH', city: 'Manila' },
+  'Asia/Yangon': { code: 'MM', city: 'Yangon' },
+  'Asia/Rangoon': { code: 'MM', city: 'Yangon' },
+  'Asia/Phnom_Penh': { code: 'KH', city: 'Phnom Penh' },
+  'Asia/Vientiane': { code: 'LA', city: 'Vientiane' },
+  'Asia/Brunei': { code: 'BN', city: 'Bandar Seri Begawan' },
+  'Asia/Dili': { code: 'TL', city: 'Dili' },
+  'Asia/Tokyo': { code: 'JP', city: 'Tokyo' },
+  'Asia/Seoul': { code: 'KR', city: 'Seoul' },
+  'Asia/Taipei': { code: 'TW', city: 'Taipei' },
+  'Asia/Hong_Kong': { code: 'HK', city: 'Hong Kong' },
+  'Asia/Macau': { code: 'MO', city: 'Macau' },
+  'Asia/Shanghai': { code: 'CN', city: 'Shanghai' },
+  'Asia/Chongqing': { code: 'CN', city: 'Chongqing' },
+  'Asia/Kolkata': { code: 'IN', city: 'Kolkata' },
+  'Asia/Calcutta': { code: 'IN', city: 'Kolkata' },
+  'Asia/Colombo': { code: 'LK', city: 'Colombo' },
+  'Asia/Kathmandu': { code: 'NP', city: 'Kathmandu' },
+  'Asia/Thimphu': { code: 'BT', city: 'Thimphu' },
+  'Asia/Dhaka': { code: 'BD', city: 'Dhaka' },
+  'Asia/Karachi': { code: 'PK', city: 'Karachi' },
+  'Asia/Dubai': { code: 'AE', city: 'Dubai' },
+  'Asia/Riyadh': { code: 'SA', city: 'Riyadh' },
+  'Asia/Qatar': { code: 'QA', city: 'Doha' },
+  'Australia/Sydney': { code: 'AU', city: 'Sydney' },
+  'Australia/Melbourne': { code: 'AU', city: 'Melbourne' },
+  'Australia/Brisbane': { code: 'AU', city: 'Brisbane' },
+  'Australia/Perth': { code: 'AU', city: 'Perth' },
+  'Australia/Adelaide': { code: 'AU', city: 'Adelaide' },
+  'Pacific/Auckland': { code: 'NZ', city: 'Auckland' },
+  'Europe/London': { code: 'GB', city: 'London' },
+  'Europe/Berlin': { code: 'DE', city: 'Berlin' },
+  'Europe/Paris': { code: 'FR', city: 'Paris' },
+  'Europe/Amsterdam': { code: 'NL', city: 'Amsterdam' },
+  'Europe/Brussels': { code: 'BE', city: 'Brussels' },
+  'Europe/Zurich': { code: 'CH', city: 'Zurich' },
+  'Europe/Vienna': { code: 'AT', city: 'Vienna' },
+  'Europe/Rome': { code: 'IT', city: 'Rome' },
+  'Europe/Madrid': { code: 'ES', city: 'Madrid' },
+  'Europe/Lisbon': { code: 'PT', city: 'Lisbon' },
+  'Europe/Stockholm': { code: 'SE', city: 'Stockholm' },
+  'Europe/Oslo': { code: 'NO', city: 'Oslo' },
+  'Europe/Copenhagen': { code: 'DK', city: 'Copenhagen' },
+  'Europe/Helsinki': { code: 'FI', city: 'Helsinki' },
+  'Europe/Warsaw': { code: 'PL', city: 'Warsaw' },
+  'Europe/Prague': { code: 'CZ', city: 'Prague' },
+  'Europe/Moscow': { code: 'RU', city: 'Moscow' },
+  'Europe/Istanbul': { code: 'TR', city: 'Istanbul' },
+  'America/New_York': { code: 'US', city: 'New York' },
+  'America/Los_Angeles': { code: 'US', city: 'Los Angeles' },
+  'America/Chicago': { code: 'US', city: 'Chicago' },
+  'America/Denver': { code: 'US', city: 'Denver' },
+  'America/Phoenix': { code: 'US', city: 'Phoenix' },
+  'America/Toronto': { code: 'CA', city: 'Toronto' },
+  'America/Vancouver': { code: 'CA', city: 'Vancouver' },
+  'America/Mexico_City': { code: 'MX', city: 'Mexico City' },
+  'America/Sao_Paulo': { code: 'BR', city: 'Sao Paulo' },
+  'America/Buenos_Aires': { code: 'AR', city: 'Buenos Aires' },
+  'America/Argentina/Buenos_Aires': { code: 'AR', city: 'Buenos Aires' },
+  'America/Santiago': { code: 'CL', city: 'Santiago' },
+  'America/Bogota': { code: 'CO', city: 'Bogota' },
+  'America/Lima': { code: 'PE', city: 'Lima' },
+  'Africa/Cairo': { code: 'EG', city: 'Cairo' },
+  'Africa/Johannesburg': { code: 'ZA', city: 'Johannesburg' },
+  'Africa/Lagos': { code: 'NG', city: 'Lagos' },
+  'Africa/Nairobi': { code: 'KE', city: 'Nairobi' },
+};
+
+function resolveCountryNameFromCode(code: string): string {
+  const upper = code.trim().toUpperCase();
+  if (!upper || upper === 'XX' || upper === 'ZZ' || upper === 'T1') return '';
+  if (WORLD_COUNTRY_NAMES_ID[upper]) {
+    return WORLD_COUNTRY_NAMES_ID[upper];
+  }
+  try {
+    const displayNames = new Intl.DisplayNames(['id', 'en'], { type: 'region' });
+    const resolved = displayNames.of(upper);
+    if (resolved && resolved !== upper) {
+      return resolved;
+    }
+  } catch {
+    // ignore Intl error
+  }
+  return upper;
+}
+
+/**
+ * Resolves worldwide visitor location (Country name in Indonesian, ISO alpha-2 code, and city)
+ * from CDN/Cloud geolocation headers, IANA timezone, or browser locale.
+ */
+export function resolveWorldwideClientLocation(input: WorldwideLocationInput): WorldwideLocationResult {
+  const rawCode = String(input.countryHeader || '').trim().toUpperCase();
+  const rawCity = String(input.cityHeader || '').trim();
+  const tz = String(input.timezone || '').trim();
+
+  if (rawCode && /^[A-Z]{2}$/.test(rawCode) && rawCode !== 'XX' && rawCode !== 'ZZ') {
+    const countryName = resolveCountryNameFromCode(rawCode) || 'Global';
+    const tzMatch = tz ? TIMEZONE_TO_LOCATION[tz] : undefined;
+    const city = rawCity || (tzMatch && tzMatch.code === rawCode ? tzMatch.city : '') || 'Online';
+    return {
+      country: countryName,
+      code: rawCode,
+      city,
+    };
+  }
+
+  if (tz) {
+    const directTz = TIMEZONE_TO_LOCATION[tz];
+    if (directTz) {
+      return {
+        country: resolveCountryNameFromCode(directTz.code) || 'Global',
+        code: directTz.code,
+        city: rawCity || directTz.city,
+      };
+    }
+
+    // Heuristic fallback for any other IANA timezone (e.g. Europe/..., America/..., Asia/..., Australia/...)
+    const parts = tz.split('/');
+    const region = parts[0];
+    const cityPart = (parts[parts.length - 1] || 'Online').replace(/_/g, ' ');
+    if (region === 'Australia') {
+      return { country: 'Australia', code: 'AU', city: rawCity || cityPart };
+    }
+    if (region === 'Europe') {
+      return { country: 'Eropa', code: 'EU', city: rawCity || cityPart };
+    }
+    if (region === 'America') {
+      return { country: 'Amerika Serikat', code: 'US', city: rawCity || cityPart };
+    }
+  }
+
+  // Fallback to Accept-Language region tag (e.g. "ja-JP,ja;q=0.9", "ms-MY", "zh-TW")
+  const lang = String(input.acceptLanguage || '').trim();
+  if (lang) {
+    const primaryTag = lang.split(',')[0]?.trim() || '';
+    const langMatch = primaryTag.match(/^[a-z]{2,3}[-_]([A-Z]{2})\b/i);
+    if (langMatch) {
+      const langCode = langMatch[1].toUpperCase();
+      const countryName = resolveCountryNameFromCode(langCode);
+      if (countryName) {
+        return {
+          country: countryName,
+          code: langCode,
+          city: rawCity || 'Online',
+        };
+      }
+    }
+  }
+
+  return {
+    country: 'Indonesia',
+    code: 'ID',
+    city: rawCity || 'Nusantara',
+  };
+}
+
 /**
  * Determines whether an access log entry is a dummy/automated test log
  * or belongs to a deleted/inactive sample game.
@@ -132,6 +378,11 @@ export function isDummyAccessLog(
 
   if (/HeadlessChrome|Playwright|Puppeteer/i.test(ua)) {
     return true;
+  }
+
+  // Portal-wide worldwide visitor logs are always valid real access logs
+  if (title.toLowerCase() === PORTAL_VISIT_GAME_TITLE.toLowerCase()) {
+    return false;
   }
 
   if (activeGameTitles) {

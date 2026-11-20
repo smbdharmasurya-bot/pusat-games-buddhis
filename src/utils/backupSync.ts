@@ -85,6 +85,27 @@ export interface NormalizedBackupUser {
   role: 'admin' | 'uploader' | 'user';
 }
 
+export interface NormalizedBackupAccessLog {
+  gameTitle: string;
+  gameCategory: string;
+  userId: string | null;
+  userName: string;
+  userRole: string;
+  ipAddress: string;
+  deviceType: string;
+  deviceModel: string;
+  browser: string;
+  os: string;
+  screenResolution: string;
+  country: string;
+  countryCode: string;
+  city: string;
+  userAgent: string;
+  durationSeconds: number;
+  completed: boolean;
+  createdAt: string;
+}
+
 export interface NormalizedBackupData {
   games: NormalizedBackupGame[];
   categories: NormalizedBackupCategory[];
@@ -94,6 +115,7 @@ export interface NormalizedBackupData {
   licenses: NormalizedBackupLicense[];
   leaderboard: NormalizedBackupLeaderboard[];
   users: NormalizedBackupUser[];
+  accessLogs?: NormalizedBackupAccessLog[];
 }
 
 function asRecord(val: unknown): Record<string, unknown> | null {
@@ -271,6 +293,34 @@ function normalizeUserRecord(raw: unknown): NormalizedBackupUser | null {
   };
 }
 
+function normalizeAccessLogRecord(raw: unknown): NormalizedBackupAccessLog | null {
+  const r = asRecord(raw);
+  if (!r) return null;
+  const gameTitle = str(r.gameTitle ?? r.game_title).trim();
+  const userName = str(r.userName ?? r.user_name).trim();
+  if (!gameTitle || !userName) return null;
+  return {
+    gameTitle,
+    gameCategory: str(r.gameCategory ?? r.game_category, 'Umum') || 'Umum',
+    userId: str(r.userId ?? r.user_id).trim() || null,
+    userName,
+    userRole: str(r.userRole ?? r.user_role, 'tamu') || 'tamu',
+    ipAddress: str(r.ipAddress ?? r.ip_address, '127.0.0.1') || '127.0.0.1',
+    deviceType: str(r.deviceType ?? r.device_type, 'Desktop PC') || 'Desktop PC',
+    deviceModel: str(r.deviceModel ?? r.device_model, 'Desktop PC'),
+    browser: str(r.browser, 'Browser Web') || 'Browser Web',
+    os: str(r.os, 'OS') || 'OS',
+    screenResolution: str(r.screenResolution ?? r.screen_resolution),
+    country: str(r.country, 'Indonesia') || 'Indonesia',
+    countryCode: str(r.countryCode ?? r.country_code, 'ID') || 'ID',
+    city: str(r.city, 'Nusantara') || 'Nusantara',
+    userAgent: str(r.userAgent ?? r.user_agent),
+    durationSeconds: Math.max(0, Math.round(num(r.durationSeconds ?? r.duration_seconds, 0))),
+    completed: bool(r.completed, false),
+    createdAt: str(r.createdAt ?? r.created_at) || new Date().toISOString(),
+  };
+}
+
 function normalizeSettings(raw: unknown): Partial<SiteSettings> {
   if (!raw) return {};
   if (Array.isArray(raw)) {
@@ -329,6 +379,7 @@ export function parseBackupPayload(input: string | unknown): NormalizedBackupDat
         licenses: [],
         leaderboard: [],
         users: [],
+        accessLogs: [],
       };
     }
     if (first && first.name !== undefined && first.slug !== undefined) {
@@ -341,6 +392,7 @@ export function parseBackupPayload(input: string | unknown): NormalizedBackupDat
         licenses: [],
         leaderboard: [],
         users: [],
+        accessLogs: [],
       };
     }
     throw new Error('Struktur array JSON tidak dikenali sebagai daftar game atau kategori.');
@@ -375,6 +427,10 @@ export function parseBackupPayload(input: string | unknown): NormalizedBackupDat
   const users = Array.isArray(container.users)
     ? container.users.map(normalizeUserRecord).filter((x): x is NormalizedBackupUser => x !== null)
     : [];
+  const accessAssetList = container.accessLogs ?? container.game_access_logs;
+  const accessLogs = Array.isArray(accessAssetList)
+    ? accessAssetList.map(normalizeAccessLogRecord).filter((x): x is NormalizedBackupAccessLog => x !== null)
+    : [];
 
   const totalItems =
     games.length +
@@ -384,7 +440,8 @@ export function parseBackupPayload(input: string | unknown): NormalizedBackupDat
     testimonials.length +
     licenses.length +
     leaderboard.length +
-    users.length;
+    users.length +
+    accessLogs.length;
 
   if (totalItems === 0) {
     throw new Error('Tidak ditemukan data game, kategori, pengaturan, sertifikat, atau entitas lain yang valid di dalam backup.');
@@ -399,6 +456,7 @@ export function parseBackupPayload(input: string | unknown): NormalizedBackupDat
     licenses,
     leaderboard,
     users,
+    accessLogs,
   };
 }
 
@@ -413,6 +471,7 @@ export function summarizeBackupPayload(data: NormalizedBackupData | BackupPayloa
     licenses: source.licenses?.length || 0,
     leaderboard: source.leaderboard?.length || 0,
     users: source.users?.length || 0,
+    accessLogs: source.accessLogs?.length || 0,
   };
 }
 

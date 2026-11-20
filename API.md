@@ -121,26 +121,26 @@ Menghapus permainan dari katalog (Admin Only).
 
 ---
 
-## 3. Kategori Kurikulum (`/categories`)
+## 3. Kategori Permainan Manual (`/categories`)
 
 ### GET `/api/v1/categories`
-Mengambil 14 kategori kurikulum beserta ikon dan jumlah permainan terkait.
+Mengambil daftar kategori permainan yang dikelola secara manual oleh pengelola (contoh: `TK`, `SD`, `SMP`, atau topik kustom lainnya) beserta ikon dan urutan tampilnya.
 
 - **Response `200 OK`**:
 ```json
-[
-  {
-    "id": "cat-01",
-    "name": "Riwayat Hidup Buddha",
-    "slug": "riwayat-hidup",
-    "description": "Kisah kehidupan Pangeran Siddhartha hingga Parinibbana",
-    "icon_type": "fa",
-    "icon_val": "fa-dharmachakra",
-    "color": "#eab308",
-    "display_order": 1,
-    "games_count": 3
-  }
-]
+{
+  "success": true,
+  "data": [
+    {
+      "id": 23,
+      "name": "TK",
+      "slug": "tk",
+      "icon": "fa-seedling",
+      "sort_order": 1,
+      "status": 1
+    }
+  ]
+}
 ```
 
 ### POST `/api/v1/categories`

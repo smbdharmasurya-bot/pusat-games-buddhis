@@ -176,33 +176,17 @@ CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_logs(created_at DESC);
 
 ---
 
-## 3. Seed Data Awal
+## 3. Inisialisasi & Pengelolaan Data Baseline Dinamis
 
-Database secara otomatis diinisialisasi saat server pertama kali dinyalakan:
+Database SQLite (`data/portal_game.db`) menggunakan prinsip **Kategori Manual & Perlindungan Baseline Dinamis**:
 
-1. **14 Kategori Resmi Kurikulum Buddhis**:
-   - Sejarah Buddha Sakyamuni (`riwayat-hidup`)
-   - Empat Kebenaran Mulia (`empat-kebenaran`)
-   - Delapan Jalan Utama Mulia (`delapan-jalan`)
-   - Pancasila Buddhis (`pancasila`)
-   - Hukum Sebab Akibat (Kamma & Punabbhava) (`kamma`)
-   - Tiga Corak Keberadaan (Tilakkhana) (`tilakkhana`)
-   - Kitab Suci Tipitaka (`tipitaka`)
-   - Kosmologi & 31 Alam Kehidupan (`kosmologi`)
-   - Meditasi & Ketenangan Batin (Bhavana) (`meditasi`)
-   - Hari Raya Suci Buddhis (`hari-raya`)
-   - Simbol & Atribut Dharma (`simbol`)
-   - Tokoh & Siswa Utama Sang Buddha (`siswa-utama`)
-   - Arsitektur Candi & Warisan Budaya (`candi`)
-   - Kuis Pilihan Cepat Dhamma (`kuis-cepat`)
+1. **Kategori Permainan (Diisi Manual)**:
+   - Sistem **tidak menyuntikkan 14 kategori kurikulum statis**.
+   - Pengelola dapat menambahkan, mengubah, atau menghapus kategori secara manual melalui **Admin Hub → Kelola Kategori** atau secara otomatis tersinkronisasi saat mengunggah permainan baru (misalnya `TK`, `SD`, `SMP`, atau topik pilihan lainnya).
 
-2. **Permainan Bawaan**:
-   - *Kuis Jejak Riwayat Sang Buddha* (Engine: Kuis Dharma)
-   - *Memory Match Simbol Suci Buddhis* (Engine: Memory Card)
-   - *Latihan Empat Kebenaran Mulia* (Engine: Kuis Dharma)
-   - *Pencocokan Delapan Jalan Mulia* (Engine: Memory Card)
-   - *Tantangan Pancasila Buddhis* (Engine: Kuis Dharma)
-   - *Teka-Teki Kitab Tipitaka* (Engine: Kuis Dharma)
+2. **Perlindungan Data Baseline Dinamis**:
+   - Seluruh data permainan aktif, kategori manual, skor leaderboard, pengguna, testimoni, logo Hero, dan log akses pengguna global yang sudah terekam dipertahankan dan terus berkembang maju (*forward-only*).
+   - Snapshot baseline otomatis (`data/backups/auto-baseline_*.db`) disinkronkan setiap 1 menit dan setiap kali terjadi pembaruan data atau akses pengguna nyata.
 
 3. **Pengaturan Beranda Standar**:
    - `hero_title`: "Pusat Games Buddhis"

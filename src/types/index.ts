@@ -115,6 +115,10 @@ export interface StatsOverview {
   totalCategories: number;
   totalLeaderboardEntries: number;
   totalCertificates: number;
+  totalCountries?: number;
+  totalUniqueVisitors?: number;
+  totalAccessSessions?: number;
+  baselineRevision?: number;
 }
 
 export interface GameAccessLog {
@@ -168,6 +172,7 @@ export interface BackupSummary {
   licenses: number;
   leaderboard: number;
   users: number;
+  accessLogs?: number;
 }
 
 export interface BackupPayload {
@@ -183,6 +188,7 @@ export interface BackupPayload {
     licenses: Partial<License>[];
     leaderboard: Partial<LeaderboardEntry>[];
     users: Partial<UserProfile>[];
+    accessLogs?: Partial<GameAccessLog>[];
   };
 }
 
@@ -200,11 +206,29 @@ export interface BackupImportResult {
   imported: BackupSummary;
 }
 
+export interface BaselineGrowthMetrics {
+  totalGamePlays: number;
+  totalAccessSessions: number;
+  uniqueCountries: number;
+  uniqueIps: number;
+  countriesList: { name: string; code: string; count: number }[];
+  lastGameUpdatedAt: string | null;
+  lastAccessAt: string | null;
+}
+
 export interface BaselineStatus {
   protected: boolean;
   initialSeedCompleted: boolean;
   baselineEstablishedAt: string | null;
   latestBaselineSnapshot: BackupSnapshotInfo | null;
+  autoSyncEnabled?: boolean;
+  autoSyncIntervalSeconds?: number;
+  lastAutoSyncAt?: string | null;
+  nextAutoSyncAt?: string | null;
+  publishedSyncUrl?: string;
+  baselineRevision?: number;
+  lastGrowthReason?: string;
+  growthMetrics?: BaselineGrowthMetrics;
   counts: {
     games: number;
     categories: number;

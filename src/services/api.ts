@@ -17,26 +17,67 @@ import {
   BackupImportResult,
 } from '../types';
 import { REALTIME_SYNC_EVENTS, SyncStateResponse } from '../utils/realtimeSync';
+import { unwrapApiJsonPayload } from '../utils/apiResponse';
 
 const API_BASE = '/api/v1';
 
-async function fetchJSON<T>(endpoint: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${API_BASE}${endpoint}`, {
-    cache: 'no-store',
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache',
-      Pragma: 'no-cache',
-      ...(options?.headers || {}),
-    },
-  });
+const RETRYABLE_HTTP_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
 
-  const json = await res.json().catch(() => null);
-  if (!res.ok) {
-    throw new Error(json?.message || `HTTP ${res.status}: Terjadi kesalahan pada server`);
+function waitMs(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchJSON<T>(endpoint: string, options?: RequestInit): Promise<T> {
+  const method = (options?.method || 'GET').toUpperCase();
+  const maxAttempts = method === 'GET' ? 3 : 1;
+  let lastError: Error | null = null;
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      const res = await fetch(`${API_BASE}${endpoint}`, {
+        cache: 'no-store',
+        ...options,
+        headers: {
+          'Content-Type': 'application/json',
+          Accept: 'application/json',
+          'Cache-Control': 'no-cache',
+          Pragma: 'no-cache',
+          ...(options?.headers || {}),
+        },
+      });
+
+      const rawText = await res.text().catch(() => '');
+      let parsed: unknown = null;
+      if (rawText.trim() !== '') {
+        try {
+          parsed = JSON.parse(rawText);
+        } catch {
+          parsed = null;
+        }
+      }
+
+      if (!res.ok && RETRYABLE_HTTP_STATUSES.has(res.status) && attempt < maxAttempts) {
+        await waitMs(attempt * 300);
+        continue;
+      }
+
+      if (res.ok && parsed === null && attempt < maxAttempts) {
+        await waitMs(attempt * 300);
+        continue;
+      }
+
+      return unwrapApiJsonPayload<T>(parsed, res.status, res.ok, endpoint);
+    } catch (err) {
+      lastError = err instanceof Error ? err : new Error(String(err));
+      if (attempt < maxAttempts) {
+        await waitMs(attempt * 300);
+        continue;
+      }
+      throw lastError;
+    }
   }
-  return json.data !== undefined ? json.data : json;
+
+  throw lastError || new Error(`Gagal memuat data dari ${endpoint}`);
 }
 
 export const api = {
@@ -323,13 +364,23 @@ export const api = {
     return json;
   },
 
-  // Game Access Tracking & Analytics
+  // Website & Game Access Tracking & Analytics
+  async recordSiteVisit(data?: {
+    user?: { id?: string; name?: string; role?: string };
+    clientInfo?: { screen?: string; timezone?: string; language?: string };
+  }): Promise<{ success: boolean; logId?: number; detected?: Record<string, string> }> {
+    return fetchJSON<{ success: boolean; logId?: number; detected?: Record<string, string> }>('/analytics/site-visit', {
+      method: 'POST',
+      body: JSON.stringify(data || {}),
+    });
+  },
+
   async recordGameAccess(data: {
     gameId?: number;
     gameTitle: string;
     gameCategory?: string;
     user?: { id?: string; name?: string; role?: string };
-    clientInfo?: { screen?: string; timezone?: string };
+    clientInfo?: { screen?: string; timezone?: string; language?: string };
   }): Promise<{ success: boolean; logId: number; detected: Record<string, string> }> {
     return fetchJSON<{ success: boolean; logId: number; detected: Record<string, string> }>('/analytics/game-access', {
       method: 'POST',
@@ -378,13 +429,31 @@ export const api = {
         'Cache-Control': 'no-cache',
       },
     });
-    const json = await res.json().catch(() => null);
-    if (!res.ok) {
-      throw new Error(json?.message || `HTTP ${res.status}: Gagal membersihkan log dummy`);
+    const rawText = await res.text().catch(() => '');
+    let json: Record<string, unknown> | null = null;
+    if (rawText.trim() !== '') {
+      try {
+        const parsed = JSON.parse(rawText);
+        json = parsed && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+      } catch {
+        json = null;
+      }
     }
+    if (!res.ok) {
+      throw new Error(
+        (json && typeof json.message === 'string' && json.message) ||
+          `HTTP ${res.status}: Gagal membersihkan log dummy`
+      );
+    }
+    const dataObj =
+      json && json.data && typeof json.data === 'object'
+        ? (json.data as Record<string, unknown>)
+        : {};
     return {
-      message: json?.message || 'Log dummy berhasil dibersihkan!',
-      ...(json?.data || {}),
+      message:
+        (json && typeof json.message === 'string' && json.message) ||
+        'Log dummy berhasil dibersihkan!',
+      ...dataObj,
     };
   },
 
@@ -438,6 +507,17 @@ export const api = {
 
   async getBaselineStatus(): Promise<import('../types').BaselineStatus> {
     return fetchJSON<import('../types').BaselineStatus>('/backup/baseline-status');
+  },
+
+  async syncBaselineNow(options?: {
+    publishedSyncUrl?: string;
+    autoSyncEnabled?: boolean;
+    forceSnapshot?: boolean;
+  }): Promise<{ message: string; data: import('../types').BaselineStatus }> {
+    return fetchJSON<{ message: string; data: import('../types').BaselineStatus }>('/backup/baseline-sync', {
+      method: 'POST',
+      body: JSON.stringify(options || {}),
+    });
   },
 
   async syncFromPublishedUrl(sourceUrl: string, mode: BackupImportMode = 'merge'): Promise<BackupImportResult> {

@@ -11,6 +11,9 @@ import {
   pruneInactiveLeaderboardScores,
   pruneDummyLogsAndSyncRealAccess,
   getBaselineDatabaseCounts,
+  getBaselineStatusPayload,
+  getSyncMetadataValue,
+  upsertSyncMetadata,
   ensureAutoBaselineSnapshotOnStartup,
 } from './src/server/db.ts';
 import { normalizeCategoryName, slugifyCategory, resolveCategoryMatch } from './src/utils/categorySync.ts';
@@ -23,13 +26,23 @@ import {
   summarizeBackupPayload,
 } from './src/utils/backupSync.ts';
 import {
+  AUTO_BASELINE_SYNC_INTERVAL_MS,
   mergeExistingAndImportedSettings,
+  resolveBaselineGrowthReason,
   validatePublishedSyncUrl,
 } from './src/utils/baselineProtection.ts';
 import {
   isDummyAccessLog,
   normalizeClientIp,
+  PORTAL_VISIT_CATEGORY,
+  PORTAL_VISIT_GAME_TITLE,
+  resolveWorldwideClientLocation,
 } from './src/utils/accessLogSync.ts';
+import {
+  buildMediaVersionTag,
+  isInternalMediaProxyUrl,
+  parseDataImageUri,
+} from './src/utils/apiResponse.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -83,8 +96,36 @@ function bumpDataRevision(): number {
   return nextRev;
 }
 
+let pendingBaselineEvolutionTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleDynamicBaselineEvolution(growthReason: string) {
+  try {
+    upsertSyncMetadata('baseline_last_growth_reason', growthReason);
+  } catch {
+    // ignore metadata error
+  }
+  if (pendingBaselineEvolutionTimer) {
+    clearTimeout(pendingBaselineEvolutionTimer);
+  }
+  pendingBaselineEvolutionTimer = setTimeout(() => {
+    pendingBaselineEvolutionTimer = null;
+    try {
+      ensureAutoBaselineSnapshotOnStartup(true, growthReason);
+      const statusPayload = getBaselineStatusPayload();
+      broadcastEvent('baseline:synced', statusPayload);
+    } catch (err) {
+      console.warn('Dynamic baseline evolution error:', (err as Error).message);
+    }
+  }, 1500);
+}
+
 export function broadcastEvent(event: string, data: unknown) {
-  const revision = event === 'connected' ? getDataRevision() : bumpDataRevision();
+  const isMutation = event !== 'connected' && event !== 'baseline:synced';
+  const revision = isMutation ? bumpDataRevision() : getDataRevision();
+  if (isMutation) {
+    const growthReason = resolveBaselineGrowthReason(event, data);
+    scheduleDynamicBaselineEvolution(growthReason);
+  }
   const enriched =
     typeof data === 'object' && data !== null && !Array.isArray(data)
       ? { ...(data as Record<string, unknown>), revision }
@@ -240,6 +281,10 @@ app.get('/api/v1/stats/overview', (_req: Request, res: Response) => {
     const totalPlayersSum = (db.prepare('SELECT SUM(players) as sum FROM games').get() as { sum: number }).sum || 0;
     const totalLeaderboardEntries = (db.prepare('SELECT COUNT(*) as count FROM leaderboard').get() as { count: number }).count;
     const totalCertificates = (db.prepare("SELECT COUNT(*) as count FROM certificates WHERE is_active = 1 AND (status IS NULL OR status != 'inactive')").get() as { count: number }).count;
+    const totalCountries = Number((db.prepare('SELECT COUNT(DISTINCT country) as c FROM game_access_logs').get() as { c: number } | undefined)?.c || 1);
+    const totalUniqueVisitors = Number((db.prepare('SELECT COUNT(DISTINCT ip_address) as c FROM game_access_logs').get() as { c: number } | undefined)?.c || 1);
+    const totalAccessSessions = Number((db.prepare('SELECT COUNT(*) as c FROM game_access_logs').get() as { c: number } | undefined)?.c || 0);
+    const baselineRevision = getDataRevision();
 
     res.json({
       success: true,
@@ -249,6 +294,10 @@ app.get('/api/v1/stats/overview', (_req: Request, res: Response) => {
         totalPlayers: totalPlayersSum,
         totalLeaderboardEntries,
         totalCertificates,
+        totalCountries: Math.max(1, totalCountries),
+        totalUniqueVisitors: Math.max(1, totalUniqueVisitors),
+        totalAccessSessions,
+        baselineRevision,
       },
     });
   } catch (error) {
@@ -256,13 +305,64 @@ app.get('/api/v1/stats/overview', (_req: Request, res: Response) => {
   }
 });
 
+function resolvePublicMediaUrl(storedValue: unknown, proxyPath: string, updatedAt?: unknown): string {
+  const raw = typeof storedValue === 'string' ? storedValue.trim() : '';
+  if (!raw) return '';
+  // Keep lightweight non-data URLs or tiny inline images as-is; offload large base64 payloads to binary endpoints
+  if (raw.length > 2048 && parseDataImageUri(raw)) {
+    const versionTag = buildMediaVersionTag(raw, updatedAt);
+    return `${proxyPath}?v=${encodeURIComponent(versionTag)}`;
+  }
+  return raw;
+}
+
+function sendBinaryOrRedirectMedia(res: Response, storedValue: unknown, fallbackLabel: string): void {
+  const raw = typeof storedValue === 'string' ? storedValue.trim() : '';
+  if (!raw) {
+    res.status(404).json({ success: false, message: `${fallbackLabel} tidak ditemukan` });
+    return;
+  }
+  const parsed = parseDataImageUri(raw);
+  if (parsed) {
+    res.setHeader('Content-Type', parsed.mimeType);
+    res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+    res.setHeader('Content-Length', String(parsed.buffer.byteLength));
+    res.end(Buffer.from(parsed.buffer));
+    return;
+  }
+  if (/^https?:\/\//i.test(raw)) {
+    res.redirect(302, raw);
+    return;
+  }
+  res.status(404).json({ success: false, message: `${fallbackLabel} bukan gambar valid` });
+}
+
 // Site Settings
+app.get('/api/v1/settings/hero-image', (_req: Request, res: Response) => {
+  try {
+    const row = db
+      .prepare("SELECT value FROM site_settings WHERE key = 'imageUrl'")
+      .get() as { value?: string } | undefined;
+    sendBinaryOrRedirectMedia(res, row?.value, 'Logo hero');
+  } catch (error) {
+    res.status(500).json({ success: false, message: (error as Error).message });
+  }
+});
+
 app.get('/api/v1/settings', (_req: Request, res: Response) => {
   try {
-    const rows = db.prepare('SELECT key, value FROM site_settings').all() as { key: string; value: string }[];
+    const rows = db.prepare('SELECT key, value, updated_at FROM site_settings').all() as {
+      key: string;
+      value: string;
+      updated_at?: string;
+    }[];
     const settings: Record<string, string> = {};
     rows.forEach((r) => {
-      settings[r.key] = r.value;
+      if (r.key === 'imageUrl') {
+        settings[r.key] = resolvePublicMediaUrl(r.value, '/api/v1/settings/hero-image', r.updated_at);
+      } else {
+        settings[r.key] = r.value;
+      }
     });
     res.json({ success: true, data: settings });
   } catch (error) {
@@ -281,11 +381,22 @@ app.post('/api/v1/settings', (req: Request, res: Response) => {
     if (title !== undefined) updateStmt.run('title', title);
     if (subtitle !== undefined) updateStmt.run('subtitle', subtitle);
     if (emoji !== undefined) updateStmt.run('emoji', emoji);
-    if (imageUrl !== undefined) updateStmt.run('imageUrl', imageUrl);
+    if (imageUrl !== undefined && !isInternalMediaProxyUrl(imageUrl)) {
+      updateStmt.run('imageUrl', imageUrl);
+    }
     if (announcement !== undefined) updateStmt.run('announcement', announcement);
 
+    const updatedImageRow = db
+      .prepare("SELECT value, updated_at FROM site_settings WHERE key = 'imageUrl'")
+      .get() as { value?: string; updated_at?: string } | undefined;
+    const publicImageUrl = resolvePublicMediaUrl(
+      updatedImageRow?.value,
+      '/api/v1/settings/hero-image',
+      updatedImageRow?.updated_at
+    );
+
     recordAudit('Admin', 'UPDATE_SETTINGS', `Updated Hero banner settings: ${title}`);
-    broadcastEvent('settings:updated', { title, subtitle, emoji, imageUrl, announcement });
+    broadcastEvent('settings:updated', { title, subtitle, emoji, imageUrl: publicImageUrl, announcement });
 
     res.json({ success: true, message: 'Pengaturan beranda berhasil disimpan!' });
   } catch (error) {
@@ -423,8 +534,11 @@ app.delete('/api/v1/categories/:id', (req: Request, res: Response) => {
 // Games
 app.get('/api/v1/games', (req: Request, res: Response) => {
   try {
-    const { category, difficulty, type, search } = req.query;
-    let query = 'SELECT * FROM games WHERE 1=1';
+    const { category, difficulty, type, search, includeCode } = req.query;
+    const shouldIncludeCode = includeCode === '1' || includeCode === 'true';
+    let query = shouldIncludeCode
+      ? 'SELECT * FROM games WHERE 1=1'
+      : 'SELECT id, title, slug, category, difficulty, type, rating, players, thumbnail, icon, description, is_premium, is_active, status, url, featured, created_at, updated_at, CASE WHEN html5_code IS NOT NULL AND LENGTH(html5_code) > 0 THEN 1 ELSE 0 END AS has_html5_code FROM games WHERE 1=1';
     const params: (string | number | bigint | null | Uint8Array)[] = [];
 
     if (category && category !== 'all' && typeof category === 'string') {
@@ -447,29 +561,57 @@ app.get('/api/v1/games', (req: Request, res: Response) => {
     query += ' ORDER BY featured DESC, id DESC';
     const games = db.prepare(query).all(...params) as Record<string, unknown>[];
 
-    const formatted = games.map((g) => ({
-      id: g.id,
-      title: g.title,
-      slug: g.slug,
-      category: g.category,
-      difficulty: g.difficulty,
-      type: g.type,
-      rating: g.rating,
-      players: g.players,
-      thumbnail: g.thumbnail || '',
-      icon: g.icon || '',
-      description: g.description,
-      isPremium: Boolean(g.is_premium),
-      isActive: g.is_active === 0 || g.status === 'inactive' ? false : true,
-      status: (g.status as string) || (g.is_active === 0 ? 'inactive' : 'published'),
-      html5Code: g.html5_code,
-      url: g.url,
-      featured: Boolean(g.featured),
-      createdAt: g.created_at,
-      updatedAt: g.updated_at,
-    }));
+    const formatted = games.map((g) => {
+      const gameId = Number(g.id);
+      return {
+        id: gameId,
+        title: g.title,
+        slug: g.slug,
+        category: g.category,
+        difficulty: g.difficulty,
+        type: g.type,
+        rating: g.rating,
+        players: g.players,
+        thumbnail: resolvePublicMediaUrl(g.thumbnail, `/api/v1/games/${gameId}/thumbnail`, g.updated_at),
+        icon: resolvePublicMediaUrl(g.icon, `/api/v1/games/${gameId}/icon`, g.updated_at),
+        description: g.description,
+        isPremium: Boolean(g.is_premium),
+        isActive: g.is_active === 0 || g.status === 'inactive' ? false : true,
+        status: (g.status as string) || (g.is_active === 0 ? 'inactive' : 'published'),
+        html5Code: shouldIncludeCode ? (g.html5_code as string | null) : undefined,
+        hasHtml5Code: shouldIncludeCode ? Boolean(g.html5_code) : Boolean(g.has_html5_code),
+        url: g.url,
+        featured: Boolean(g.featured),
+        createdAt: g.created_at,
+        updatedAt: g.updated_at,
+      };
+    });
 
     res.json({ success: true, data: formatted });
+  } catch (error) {
+    res.status(500).json({ success: false, message: (error as Error).message });
+  }
+});
+
+app.get('/api/v1/games/:id/thumbnail', (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const row = db.prepare('SELECT thumbnail FROM games WHERE id = ?').get(id) as
+      | { thumbnail?: string }
+      | undefined;
+    sendBinaryOrRedirectMedia(res, row?.thumbnail, 'Thumbnail game');
+  } catch (error) {
+    res.status(500).json({ success: false, message: (error as Error).message });
+  }
+});
+
+app.get('/api/v1/games/:id/icon', (req: Request, res: Response) => {
+  try {
+    const id = Number(req.params.id);
+    const row = db.prepare('SELECT icon FROM games WHERE id = ?').get(id) as
+      | { icon?: string }
+      | undefined;
+    sendBinaryOrRedirectMedia(res, row?.icon, 'Ikon game');
   } catch (error) {
     res.status(500).json({ success: false, message: (error as Error).message });
   }
@@ -483,10 +625,11 @@ app.get('/api/v1/games/:id', (req: Request, res: Response) => {
       res.status(404).json({ success: false, message: 'Permainan tidak ditemukan' });
       return;
     }
+    const gameId = Number(g.id);
     res.json({
       success: true,
       data: {
-        id: g.id,
+        id: gameId,
         title: g.title,
         slug: g.slug,
         category: g.category,
@@ -494,8 +637,8 @@ app.get('/api/v1/games/:id', (req: Request, res: Response) => {
         type: g.type,
         rating: g.rating,
         players: g.players,
-        thumbnail: g.thumbnail || '',
-        icon: g.icon || '',
+        thumbnail: resolvePublicMediaUrl(g.thumbnail, `/api/v1/games/${gameId}/thumbnail`, g.updated_at),
+        icon: resolvePublicMediaUrl(g.icon, `/api/v1/games/${gameId}/icon`, g.updated_at),
         description: g.description,
         isPremium: Boolean(g.is_premium),
         isActive: g.is_active === 0 || g.status === 'inactive' ? false : true,
@@ -503,6 +646,8 @@ app.get('/api/v1/games/:id', (req: Request, res: Response) => {
         html5Code: g.html5_code,
         url: g.url,
         featured: Boolean(g.featured),
+        createdAt: g.created_at,
+        updatedAt: g.updated_at,
       },
     });
   } catch (error) {
@@ -626,8 +771,14 @@ app.put('/api/v1/games/:id', (req: Request, res: Response) => {
         icon: (existing.icon as string) || '',
       },
       {
-        thumbnail: thumbnail !== undefined ? String(thumbnail) : undefined,
-        icon: icon !== undefined ? String(icon) : undefined,
+        thumbnail:
+          thumbnail !== undefined && !isInternalMediaProxyUrl(thumbnail)
+            ? String(thumbnail)
+            : undefined,
+        icon:
+          icon !== undefined && !isInternalMediaProxyUrl(icon)
+            ? String(icon)
+            : undefined,
       }
     );
 
@@ -663,12 +814,14 @@ app.put('/api/v1/games/:id', (req: Request, res: Response) => {
       );
 
       if (nextTitle !== String(existing.title)) {
-        db.prepare('UPDATE leaderboard SET game_title = ? WHERE game_id = ? OR game_title = ?')
+        db.prepare('UPDATE leaderboard SET game_title = ? WHERE game_id = ? OR LOWER(TRIM(game_title)) = LOWER(TRIM(?))')
           .run(nextTitle, id, String(existing.title));
+        db.prepare('UPDATE testimonials SET game = ? WHERE LOWER(TRIM(game)) = LOWER(TRIM(?))')
+          .run(nextTitle, String(existing.title));
       }
       if (nextTitle !== String(existing.title) || syncedCategory !== String(existing.category)) {
-        db.prepare('UPDATE game_access_logs SET game_title = ?, game_category = ? WHERE game_id = ?')
-          .run(nextTitle, syncedCategory, id);
+        db.prepare('UPDATE game_access_logs SET game_id = ?, game_title = ?, game_category = ? WHERE game_id = ? OR LOWER(TRIM(game_title)) = LOWER(TRIM(?))')
+          .run(id, nextTitle, syncedCategory, id, String(existing.title));
       }
       db.exec('COMMIT');
     } catch (txErr) {
@@ -693,8 +846,8 @@ app.put('/api/v1/games/:id', (req: Request, res: Response) => {
       id,
       title: nextTitle,
       category: syncedCategory,
-      thumbnail: mergedMedia.thumbnail,
-      icon: mergedMedia.icon,
+      thumbnail: resolvePublicMediaUrl(mergedMedia.thumbnail, `/api/v1/games/${id}/thumbnail`),
+      icon: resolvePublicMediaUrl(mergedMedia.icon, `/api/v1/games/${id}/icon`),
       isActive: Boolean(newIsActive),
       status: newStatus,
     });
@@ -1613,46 +1766,132 @@ function parseDeviceInfo(uaString: string) {
   return { deviceType, deviceModel, browser, os };
 }
 
-function resolveClientLocation(req: Request, clientTz?: string): { country: string; code: string; city: string } {
-  const cfCountry = req.headers['cf-ipcountry'] as string;
-  const gcpCountry = (req.headers['x-appengine-country'] || req.headers['x-country-code']) as string;
-  const code = (cfCountry || gcpCountry || '').toUpperCase();
+function resolveClientLocation(
+  req: Request,
+  clientTz?: string,
+  clientLang?: string
+): { country: string; code: string; city: string } {
+  const countryHeader =
+    (req.headers['cf-ipcountry'] as string) ||
+    (req.headers['x-appengine-country'] as string) ||
+    (req.headers['x-country-code'] as string) ||
+    (req.headers['x-vercel-ip-country'] as string) ||
+    '';
+  const cityHeader =
+    (req.headers['cf-ipcity'] as string) ||
+    (req.headers['x-appengine-city'] as string) ||
+    (req.headers['x-vercel-ip-city'] as string) ||
+    '';
+  const acceptLanguage = clientLang || (req.headers['accept-language'] as string) || '';
 
-  const countryNames: Record<string, string> = {
-    ID: 'Indonesia',
-    SG: 'Singapura',
-    MY: 'Malaysia',
-    TH: 'Thailand',
-    VN: 'Vietnam',
-    PH: 'Filipina',
-    US: 'Amerika Serikat',
-    AU: 'Australia',
-    JP: 'Jepang',
-    KR: 'Korea Selatan',
-    TW: 'Taiwan',
-    CN: 'Tiongkok',
-    IN: 'India',
-    GB: 'Inggris',
-    DE: 'Jerman',
-    NL: 'Belanda',
-  };
-
-  if (code && countryNames[code]) {
-    return { country: countryNames[code], code, city: (req.headers['x-appengine-city'] as string) || 'Online' };
-  }
-
-  if (clientTz) {
-    if (clientTz.includes('Jakarta') || clientTz.includes('Makassar') || clientTz.includes('Jayapura') || clientTz.includes('Pontianak') || clientTz.includes('Asia/Jakarta')) {
-      return { country: 'Indonesia', code: 'ID', city: clientTz.split('/')[1] || 'Indonesia' };
-    }
-    if (clientTz.includes('Singapore')) return { country: 'Singapura', code: 'SG', city: 'Singapore' };
-    if (clientTz.includes('Kuala_Lumpur')) return { country: 'Malaysia', code: 'MY', city: 'Kuala Lumpur' };
-    if (clientTz.includes('Bangkok')) return { country: 'Thailand', code: 'TH', city: 'Bangkok' };
-    if (clientTz.includes('Tokyo')) return { country: 'Jepang', code: 'JP', city: 'Tokyo' };
-  }
-
-  return { country: 'Indonesia', code: 'ID', city: 'Nusantara' };
+  return resolveWorldwideClientLocation({
+    countryHeader,
+    cityHeader,
+    timezone: clientTz,
+    acceptLanguage,
+  });
 }
+
+// 0. Record Global Website Portal Visit (evolves baseline as users worldwide access the website)
+app.post('/api/v1/analytics/site-visit', (req: Request, res: Response) => {
+  try {
+    const { user, clientInfo } = req.body || {};
+    const uaString = String(req.headers['user-agent'] || '');
+    const { deviceType, deviceModel, browser, os } = parseDeviceInfo(uaString);
+    const { country, code: countryCode, city } = resolveClientLocation(
+      req,
+      clientInfo?.timezone,
+      clientInfo?.language
+    );
+
+    const cfIp = req.headers['cf-connecting-ip'] as string | undefined;
+    const forwarded = req.headers['x-forwarded-for'] as string | undefined;
+    const realIp = req.headers['x-real-ip'] as string | undefined;
+    const ipAddress = normalizeClientIp(cfIp || forwarded || realIp || req.socket.remoteAddress || '127.0.0.1');
+
+    const userId = user?.id || null;
+    const userName = user?.name ? String(user.name).trim() : 'Tamu Dharma';
+    const userRole = user?.role || (user?.id ? 'user' : 'tamu');
+    const screenRes = clientInfo?.screen || null;
+
+    if (
+      isDummyAccessLog({
+        gameId: null,
+        gameTitle: PORTAL_VISIT_GAME_TITLE,
+        userName,
+        userAgent: uaString,
+      })
+    ) {
+      res.json({
+        success: true,
+        skippedDummy: true,
+        detected: { deviceType, deviceModel, browser, os, country, countryCode, city, ipAddress },
+      });
+      return;
+    }
+
+    // Deduplicate identical portal visits from the same IP + user within 30 minutes
+    const recentVisit = db
+      .prepare(`
+        SELECT id FROM game_access_logs
+        WHERE ip_address = ?
+          AND LOWER(TRIM(user_name)) = LOWER(TRIM(?))
+          AND created_at >= datetime('now', '-30 minutes')
+        ORDER BY id DESC
+        LIMIT 1
+      `)
+      .get(ipAddress, userName) as { id: number } | undefined;
+
+    if (recentVisit) {
+      res.json({
+        success: true,
+        logId: recentVisit.id,
+        deduplicated: true,
+        detected: { deviceType, deviceModel, browser, os, country, countryCode, city, ipAddress },
+      });
+      return;
+    }
+
+    const info = db.prepare(`
+      INSERT INTO game_access_logs (
+        game_id, game_title, game_category, user_id, user_name, user_role,
+        ip_address, device_type, device_model, browser, os, screen_resolution,
+        country, country_code, city, user_agent, duration_seconds, completed
+      ) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 15, 1)
+    `).run(
+      PORTAL_VISIT_GAME_TITLE,
+      PORTAL_VISIT_CATEGORY,
+      userId,
+      userName,
+      userRole,
+      ipAddress,
+      deviceType,
+      deviceModel,
+      browser,
+      os,
+      screenRes,
+      country,
+      countryCode,
+      city,
+      uaString.slice(0, 255)
+    );
+
+    broadcastEvent('stats:updated', {
+      gameTitle: PORTAL_VISIT_GAME_TITLE,
+      country,
+      countryCode,
+      logId: Number(info.lastInsertRowid),
+    });
+
+    res.json({
+      success: true,
+      logId: Number(info.lastInsertRowid),
+      detected: { deviceType, deviceModel, browser, os, country, countryCode, city, ipAddress },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: (error as Error).message });
+  }
+});
 
 // 1. Record Game Access (called whenever any user - logged in or guest - launches/plays a game)
 app.post('/api/v1/analytics/game-access', (req: Request, res: Response) => {
@@ -1665,7 +1904,11 @@ app.post('/api/v1/analytics/game-access', (req: Request, res: Response) => {
 
     const uaString = String(req.headers['user-agent'] || '');
     const { deviceType, deviceModel, browser, os } = parseDeviceInfo(uaString);
-    const { country, code: countryCode, city } = resolveClientLocation(req, clientInfo?.timezone);
+    const { country, code: countryCode, city } = resolveClientLocation(
+      req,
+      clientInfo?.timezone,
+      clientInfo?.language
+    );
 
     // Resolve and normalize client IP address
     const cfIp = req.headers['cf-connecting-ip'] as string | undefined;
@@ -1759,7 +2002,13 @@ app.post('/api/v1/analytics/game-access', (req: Request, res: Response) => {
     if (canonicalGameId) {
       db.prepare('UPDATE games SET players = players + 1 WHERE id = ?').run(canonicalGameId);
     }
-    broadcastEvent('stats:updated', { gameId: canonicalGameId, gameTitle: canonicalGameTitle, logId: Number(info.lastInsertRowid) });
+    broadcastEvent('stats:updated', {
+      gameId: canonicalGameId,
+      gameTitle: canonicalGameTitle,
+      country,
+      countryCode,
+      logId: Number(info.lastInsertRowid),
+    });
 
     res.json({
       success: true,
@@ -2112,6 +2361,27 @@ function buildCurrentBackupPayload() {
     role: u.role || 'user',
   }));
 
+  const accessLogs = (db.prepare('SELECT * FROM game_access_logs ORDER BY id ASC').all() as Record<string, unknown>[]).map((al) => ({
+    gameTitle: al.game_title,
+    gameCategory: al.game_category || 'Umum',
+    userId: al.user_id || null,
+    userName: al.user_name,
+    userRole: al.user_role || 'tamu',
+    ipAddress: al.ip_address || '127.0.0.1',
+    deviceType: al.device_type || 'Desktop PC',
+    deviceModel: al.device_model || 'Desktop PC',
+    browser: al.browser || 'Browser Web',
+    os: al.os || 'OS',
+    screenResolution: al.screen_resolution || '',
+    country: al.country || 'Indonesia',
+    countryCode: al.country_code || 'ID',
+    city: al.city || 'Nusantara',
+    userAgent: al.user_agent || '',
+    durationSeconds: Number(al.duration_seconds || 0),
+    completed: Boolean(al.completed),
+    createdAt: al.created_at,
+  }));
+
   const payload = {
     version: '1.0',
     exportedAt: new Date().toISOString(),
@@ -2124,6 +2394,7 @@ function buildCurrentBackupPayload() {
       licenses,
       leaderboard,
       users,
+      accessLogs,
     },
   };
 
@@ -2160,6 +2431,7 @@ function readBackupDataFromSqliteFile(sqliteFilePath: string): NormalizedBackupD
         licenses: safeAll('licenses'),
         leaderboard: safeAll('leaderboard'),
         users: rawUsers,
+        accessLogs: safeAll('game_access_logs'),
       },
     });
   } finally {
@@ -2170,9 +2442,12 @@ function readBackupDataFromSqliteFile(sqliteFilePath: string): NormalizedBackupD
 function executeNormalizedBackupImport(
   parsed: NormalizedBackupData,
   mode: 'merge' | 'replace',
-  sourceLabel: string
+  sourceLabel: string,
+  options?: { skipSafetySnapshot?: boolean; silentAudit?: boolean }
 ) {
-  const safetySnapshot = createSafetySnapshotInBackupDir(`pre-${mode}`);
+  const safetySnapshot = options?.skipSafetySnapshot
+    ? (ensureAutoBaselineSnapshotOnStartup(false) || 'auto-baseline')
+    : createSafetySnapshotInBackupDir(`pre-${mode}`);
 
   db.exec('BEGIN IMMEDIATE');
   try {
@@ -2425,6 +2700,65 @@ function executeNormalizedBackupImport(
       }
     }
 
+    // 8b. Merge real worldwide access logs from backup/snapshot
+    if (Array.isArray(parsed.accessLogs) && parsed.accessLogs.length > 0) {
+      for (const al of parsed.accessLogs) {
+        if (
+          isDummyAccessLog({
+            gameTitle: al.gameTitle,
+            userName: al.userName,
+            userAgent: al.userAgent,
+          })
+        ) {
+          continue;
+        }
+        const matchedGame = db
+          .prepare("SELECT id, title, category FROM games WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) AND is_active = 1 AND (status IS NULL OR status != 'inactive') LIMIT 1")
+          .get(al.gameTitle) as { id: number; title: string; category: string } | undefined;
+        const isPortalVisit = al.gameTitle.toLowerCase() === PORTAL_VISIT_GAME_TITLE.toLowerCase();
+        if (!matchedGame && !isPortalVisit) continue;
+
+        const canonicalTitle = matchedGame ? matchedGame.title : PORTAL_VISIT_GAME_TITLE;
+        const canonicalCat = matchedGame ? matchedGame.category : PORTAL_VISIT_CATEGORY;
+        const canonicalGameId = matchedGame ? matchedGame.id : null;
+
+        const dupLog = db
+          .prepare(
+            'SELECT id FROM game_access_logs WHERE LOWER(TRIM(user_name)) = LOWER(TRIM(?)) AND LOWER(TRIM(game_title)) = LOWER(TRIM(?)) AND created_at = ?'
+          )
+          .get(al.userName, canonicalTitle, al.createdAt);
+        if (!dupLog) {
+          db.prepare(`
+            INSERT INTO game_access_logs (
+              game_id, game_title, game_category, user_id, user_name, user_role,
+              ip_address, device_type, device_model, browser, os, screen_resolution,
+              country, country_code, city, user_agent, duration_seconds, completed, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            canonicalGameId,
+            canonicalTitle,
+            canonicalCat,
+            al.userId,
+            al.userName,
+            al.userRole,
+            normalizeClientIp(al.ipAddress),
+            al.deviceType,
+            al.deviceModel,
+            al.browser,
+            al.os,
+            al.screenResolution || null,
+            al.country,
+            al.countryCode,
+            al.city,
+            al.userAgent,
+            al.durationSeconds,
+            al.completed ? 1 : 0,
+            al.createdAt
+          );
+        }
+      }
+    }
+
     // 9. Clean dummy logs & synchronize real access logs from active game leaderboard sessions
     pruneDummyLogsAndSyncRealAccess();
 
@@ -2439,11 +2773,13 @@ function executeNormalizedBackupImport(
   }
 
   const importedCounts = summarizeBackupPayload(parsed);
-  recordAudit(
-    'Admin',
-    'IMPORT_BACKUP',
-    `Import backup (${mode}) dari ${sourceLabel}: ${importedCounts.games} game, ${importedCounts.categories} kategori, ${importedCounts.certificates} sertifikat. Snapshot pengaman: ${safetySnapshot}`
-  );
+  if (!options?.silentAudit) {
+    recordAudit(
+      'Admin',
+      'IMPORT_BACKUP',
+      `Import backup (${mode}) dari ${sourceLabel}: ${importedCounts.games} game, ${importedCounts.categories} kategori, ${importedCounts.certificates} sertifikat. Snapshot pengaman: ${safetySnapshot}`
+    );
+  }
   broadcastEvent('backup:imported', { mode, imported: importedCounts, safetySnapshot });
 
   return {
@@ -2662,50 +2998,106 @@ app.post('/api/v1/backup/snapshots/:filename/restore', (req: Request, res: Respo
   }
 });
 
+// Automatic 1-Minute Baseline Protection & Published Data Synchronization Engine
+let isRunningAutoBaselineSync = false;
+
+async function runAutoBaselineSyncCycle(options?: {
+  forceSnapshot?: boolean;
+  publishedSyncUrl?: string;
+  autoSyncEnabled?: boolean;
+}) {
+  if (isRunningAutoBaselineSync) {
+    return getBaselineStatusPayload();
+  }
+  isRunningAutoBaselineSync = true;
+  try {
+    if (options?.publishedSyncUrl !== undefined) {
+      const trimmed = String(options.publishedSyncUrl).trim();
+      if (trimmed) {
+        const cleanUrl = validatePublishedSyncUrl(trimmed);
+        upsertSyncMetadata('published_sync_url', cleanUrl);
+      }
+    }
+    if (options?.autoSyncEnabled !== undefined) {
+      upsertSyncMetadata('baseline_auto_sync_enabled', options.autoSyncEnabled ? '1' : '0');
+    }
+
+    const isAutoEnabled = getSyncMetadataValue('baseline_auto_sync_enabled') !== '0';
+    if (!isAutoEnabled && !options?.forceSnapshot) {
+      return getBaselineStatusPayload();
+    }
+
+    // 1. Keep baseline database clean & real access logs synchronized
+    pruneInactiveLeaderboardScores();
+    pruneDummyLogsAndSyncRealAccess();
+
+    // 2. Non-destructive background merge from configured published URL (if reachable without browser auth)
+    const configuredUrl = getSyncMetadataValue('published_sync_url') || '';
+    if (configuredUrl && !/localhost|127\.0\.0\.1/i.test(configuredUrl)) {
+      try {
+        const cleanUrl = validatePublishedSyncUrl(configuredUrl);
+        const resp = await fetch(`${cleanUrl}/api/v1/backup/export`, {
+          method: 'GET',
+          headers: {
+            Accept: 'application/json',
+            'Cache-Control': 'no-cache',
+          },
+          signal: AbortSignal.timeout(5000),
+        });
+        const contentType = String(resp.headers.get('content-type') || '').toLowerCase();
+        if (resp.ok && contentType.includes('application/json')) {
+          const rawJson = (await resp.json()) as Record<string, unknown>;
+          const payloadCandidate = rawJson?.data && rawJson?.success === true ? rawJson.data : rawJson;
+          const parsed = parseBackupPayload(payloadCandidate);
+          executeNormalizedBackupImport(parsed, 'merge', `Auto-Sync Baseline 1 Menit (${cleanUrl})`, {
+            skipSafetySnapshot: true,
+            silentAudit: true,
+          });
+        }
+      } catch {
+        // Gracefully continue with local SQLite baseline snapshot protection when external URL is behind browser login
+      }
+    }
+
+    // 3. Synchronize & create 1-minute auto-baseline SQLite snapshot
+    ensureAutoBaselineSnapshotOnStartup(Boolean(options?.forceSnapshot));
+
+    const statusPayload = getBaselineStatusPayload();
+    broadcastEvent('baseline:synced', statusPayload);
+    return statusPayload;
+  } finally {
+    isRunningAutoBaselineSync = false;
+  }
+}
+
 // 9. Get Baseline Data Protection Status & Live Recorded Counts
 app.get('/api/v1/backup/baseline-status', (_req: Request, res: Response) => {
   try {
-    ensureAutoBaselineSnapshotOnStartup();
-    const metaRows = db
-      .prepare("SELECT key, value FROM sync_metadata WHERE key IN ('baseline_protection', 'initial_seed_completed', 'baseline_established_at')")
-      .all() as { key: string; value: string }[];
-    const metaMap: Record<string, string> = {};
-    for (const r of metaRows) {
-      metaMap[r.key] = r.value;
-    }
-
-    let latestBaselineSnapshot: { filename: string; sizeBytes: number; createdAt: string } | null = null;
-    if (fs.existsSync(BACKUP_DIR)) {
-      const dbFiles = fs
-        .readdirSync(BACKUP_DIR)
-        .filter((f) => f.endsWith('.db'))
-        .map((filename) => {
-          const stats = fs.statSync(path.join(BACKUP_DIR, filename));
-          return {
-            filename,
-            sizeBytes: stats.size,
-            createdAt: stats.mtime.toISOString(),
-          };
-        })
-        .filter((f) => f.sizeBytes > 0)
-        .sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
-
-      latestBaselineSnapshot =
-        dbFiles.find((f) => /^auto-baseline_.*\.db$/i.test(f.filename)) || dbFiles[0] || null;
-    }
-
+    ensureAutoBaselineSnapshotOnStartup(false);
     res.json({
       success: true,
-      data: {
-        protected: metaMap.baseline_protection === 'enabled',
-        initialSeedCompleted: metaMap.initial_seed_completed === '1',
-        baselineEstablishedAt: metaMap.baseline_established_at || null,
-        latestBaselineSnapshot,
-        counts: getBaselineDatabaseCounts(),
-      },
+      data: getBaselineStatusPayload(),
     });
   } catch (error) {
     res.status(500).json({ success: false, message: (error as Error).message });
+  }
+});
+
+// 9b. Trigger or Configure 1-Minute Auto Baseline Sync
+app.post('/api/v1/backup/baseline-sync', async (req: Request, res: Response) => {
+  try {
+    const status = await runAutoBaselineSyncCycle({
+      forceSnapshot: Boolean(req.body?.forceSnapshot),
+      publishedSyncUrl: req.body?.publishedSyncUrl,
+      autoSyncEnabled: req.body?.autoSyncEnabled,
+    });
+    res.json({
+      success: true,
+      message: 'Perlindungan Baseline Data Terpublish berhasil disinkronkan!',
+      data: status,
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: (error as Error).message });
   }
 });
 
@@ -2713,6 +3105,7 @@ app.get('/api/v1/backup/baseline-status', (_req: Request, res: Response) => {
 app.post('/api/v1/backup/sync-from-url', async (req: Request, res: Response) => {
   try {
     const cleanUrl = validatePublishedSyncUrl(String(req.body?.sourceUrl || ''));
+    upsertSyncMetadata('published_sync_url', cleanUrl);
     const mode = req.body?.mode === 'replace' ? 'replace' : 'merge';
     const exportEndpoint = `${cleanUrl}/api/v1/backup/export`;
 
@@ -2727,9 +3120,13 @@ app.post('/api/v1/backup/sync-from-url', async (req: Request, res: Response) => 
 
     const contentType = String(resp.headers.get('content-type') || '').toLowerCase();
     if (!resp.ok || !contentType.includes('application/json')) {
+      // Even when external URL requires browser auth, keep local baseline snapshot synchronized
+      ensureAutoBaselineSnapshotOnStartup(true);
+      const localBaseline = getBaselineStatusPayload();
+      broadcastEvent('baseline:synced', localBaseline);
       res.status(400).json({
         success: false,
-        message: `Gagal menarik data otomatis dari "${cleanUrl}" (HTTP ${resp.status} atau halaman memerlukan autentikasi browser). Silakan buka website terpublish di browser -> Admin Hub -> Tab Backup & Restore -> klik "Unduh Backup JSON" atau "Unduh File SQLite (.db)", lalu impor file tersebut di sini menggunakan Mode Gabungkan (Merge).`,
+        message: `URL terpublish "${cleanUrl}" telah disimpan untuk jadwal sinkronisasi otomatis 1 menit, namun penarikan langsung memerlukan sesi login browser (HTTP ${resp.status}). Baseline lokal Anda (${localBaseline.counts.games} game, ${localBaseline.counts.categories} kategori, ${localBaseline.counts.leaderboard} skor) telah diamankan otomatis ke snapshot "${localBaseline.latestBaselineSnapshot?.filename || 'auto-baseline'}".`,
       });
       return;
     }
@@ -2738,6 +3135,8 @@ app.post('/api/v1/backup/sync-from-url', async (req: Request, res: Response) => 
     const payloadCandidate = rawJson?.data && rawJson?.success === true ? rawJson.data : rawJson;
     const parsed = parseBackupPayload(payloadCandidate);
     const result = executeNormalizedBackupImport(parsed, mode, `Website Terpublish (${cleanUrl})`);
+    ensureAutoBaselineSnapshotOnStartup(true);
+    broadcastEvent('baseline:synced', getBaselineStatusPayload());
 
     res.json({
       success: true,
@@ -2750,6 +3149,14 @@ app.post('/api/v1/backup/sync-from-url', async (req: Request, res: Response) => 
     const msg = (error as Error).message || 'Gagal menyinkronkan dari URL terpublish.';
     res.status(400).json({ success: false, message: msg });
   }
+});
+
+// Never allow unknown /api/* routes to fall through to SPA HTML (which breaks JSON clients)
+app.use('/api', (req: Request, res: Response) => {
+  res.status(404).json({
+    success: false,
+    message: `Endpoint API tidak ditemukan: ${req.method} ${req.originalUrl}`,
+  });
 });
 
 // ==========================================
@@ -2771,8 +3178,13 @@ async function startServer() {
     });
   }
 
+  // Run automatic baseline data protection & synchronization every 1 minute (60,000 ms)
+  setInterval(() => {
+    void runAutoBaselineSyncCycle({ forceSnapshot: false });
+  }, AUTO_BASELINE_SYNC_INTERVAL_MS);
+
   app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Pusat Games Buddhis] Server running at http://0.0.0.0:${PORT}`);
+    console.log(`[Pusat Games Buddhis] Server running at http://0.0.0.0:${PORT} (Auto-Baseline Sync: every 60s)`);
   });
 }
 

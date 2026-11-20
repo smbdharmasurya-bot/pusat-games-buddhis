@@ -76,6 +76,11 @@ import {
   filterActiveGamesLeaderboard,
   getResettableLeaderboardGameNames,
 } from '../utils/scoreAutoSync';
+import {
+  AUTO_BASELINE_SYNC_INTERVAL_MS,
+  calculateNextAutoBaselineSyncSeconds,
+  DEFAULT_PUBLISHED_SYNC_URL,
+} from '../utils/baselineProtection';
 
 interface AdminHubModalProps {
   isOpen: boolean;
@@ -233,8 +238,10 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
     label: string;
   } | null>(null);
   const [baselineStatus, setBaselineStatus] = React.useState<BaselineStatus | null>(null);
-  const [publishedSyncUrl, setPublishedSyncUrl] = React.useState('');
+  const [publishedSyncUrl, setPublishedSyncUrl] = React.useState(DEFAULT_PUBLISHED_SYNC_URL);
   const [isSyncingPublished, setIsSyncingPublished] = React.useState(false);
+  const [isSyncingBaselineNow, setIsSyncingBaselineNow] = React.useState(false);
+  const [baselineCountdownSec, setBaselineCountdownSec] = React.useState<number>(60);
 
   const showToast = React.useCallback((text: string, type: 'success' | 'error' = 'success') => {
     setToastMessage({ text, type });
@@ -340,6 +347,12 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
       setBackupSnapshots(list);
       if (status) {
         setBaselineStatus(status);
+        if (status.publishedSyncUrl) {
+          setPublishedSyncUrl((prev) => prev.trim() || status.publishedSyncUrl || DEFAULT_PUBLISHED_SYNC_URL);
+        }
+        setBaselineCountdownSec(
+          calculateNextAutoBaselineSyncSeconds(status.lastAutoSyncAt, Date.now())
+        );
       }
     } catch (err) {
       console.warn('Failed loading backup snapshots:', err);
@@ -381,6 +394,67 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
     }, 5000);
     return () => window.clearInterval(interval);
   }, [isOpen, isAuthenticated, activeTab, loadAnalytics]);
+
+  // Automatic 1-minute synchronization for Perlindungan Baseline Data Terpublish
+  React.useEffect(() => {
+    if (!isOpen || !isAuthenticated) return;
+    const syncInterval = window.setInterval(async () => {
+      try {
+        const res = await api.syncBaselineNow({
+          publishedSyncUrl: publishedSyncUrl.trim() || DEFAULT_PUBLISHED_SYNC_URL,
+          autoSyncEnabled: true,
+          forceSnapshot: false,
+        });
+        if (res?.data) {
+          setBaselineStatus(res.data);
+          setBaselineCountdownSec(
+            calculateNextAutoBaselineSyncSeconds(res.data.lastAutoSyncAt, Date.now())
+          );
+        }
+        if (activeTab === 'backup') {
+          const snapshots = await api.getBackupSnapshots().catch(() => null);
+          if (snapshots) setBackupSnapshots(snapshots);
+        }
+      } catch (err) {
+        console.warn('Auto baseline sync check failed:', err);
+      }
+    }, AUTO_BASELINE_SYNC_INTERVAL_MS);
+
+    return () => window.clearInterval(syncInterval);
+  }, [isOpen, isAuthenticated, activeTab, publishedSyncUrl]);
+
+  // Live 1-second countdown indicator for 1-minute automatic baseline sync when viewing Backup & Restore tab
+  React.useEffect(() => {
+    if (!isOpen || !isAuthenticated || activeTab !== 'backup') return;
+    const tick = window.setInterval(() => {
+      setBaselineCountdownSec((prev) => {
+        if (baselineStatus?.lastAutoSyncAt) {
+          const remaining = calculateNextAutoBaselineSyncSeconds(
+            baselineStatus.lastAutoSyncAt,
+            Date.now()
+          );
+          if (remaining <= 1) {
+            void api
+              .syncBaselineNow({
+                publishedSyncUrl: publishedSyncUrl.trim() || DEFAULT_PUBLISHED_SYNC_URL,
+                autoSyncEnabled: true,
+                forceSnapshot: false,
+              })
+              .then((res) => {
+                if (res?.data) {
+                  setBaselineStatus(res.data);
+                }
+                return loadBackupSnapshots();
+              })
+              .catch(() => {});
+          }
+          return remaining;
+        }
+        return prev <= 1 ? 60 : prev - 1;
+      });
+    }, 1000);
+    return () => window.clearInterval(tick);
+  }, [isOpen, isAuthenticated, activeTab, baselineStatus?.lastAutoSyncAt, publishedSyncUrl, loadBackupSnapshots]);
 
   const handlePruneDummyLogs = async () => {
     try {
@@ -1123,6 +1197,32 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
       showToast((err as Error).message, 'error');
     } finally {
       setIsBackupBusy(false);
+    }
+  };
+
+  const handleSyncBaselineNow = async () => {
+    try {
+      setIsSyncingBaselineNow(true);
+      const res = await api.syncBaselineNow({
+        publishedSyncUrl: publishedSyncUrl.trim() || DEFAULT_PUBLISHED_SYNC_URL,
+        autoSyncEnabled: true,
+        forceSnapshot: true,
+      });
+      if (res?.data) {
+        setBaselineStatus(res.data);
+        setBaselineCountdownSec(
+          calculateNextAutoBaselineSyncSeconds(res.data.lastAutoSyncAt, Date.now())
+        );
+      }
+      await loadBackupSnapshots();
+      onDataChanged();
+      playCorrectSound();
+      showToast(res.message || 'Perlindungan Baseline Data Terpublish berhasil disinkronkan!');
+    } catch (err) {
+      playIncorrectSound();
+      showToast((err as Error).message || 'Gagal menyinkronkan baseline data', 'error');
+    } finally {
+      setIsSyncingBaselineNow(false);
     }
   };
 
@@ -2207,7 +2307,7 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
                             required
                             value={customCategoryName}
                             onChange={(e) => setCustomCategoryName(e.target.value)}
-                            placeholder="Contoh: Pancasila Buddhis"
+                            placeholder="Contoh: TK, SD, SMP, atau Topik Kustom"
                             className="w-full mt-1 p-2.5 rounded-xl bg-white dark:bg-slate-900 border border-amber-500/40 text-xs focus:ring-2 focus:ring-amber-500 outline-none text-slate-800 dark:text-slate-100"
                           />
                         </div>
@@ -4092,25 +4192,48 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
                           }`}>
                             {baselineStatus?.protected ? 'Perlindungan Baseline Aktif' : 'Memeriksa Baseline...'}
                           </span>
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800 border border-sky-300 dark:bg-sky-900/40 dark:text-sky-300 dark:border-sky-800">
+                            <span className="w-1.5 h-1.5 rounded-full bg-sky-500 animate-pulse" />
+                            <span>Sinkron Otomatis Setiap 1 Menit (Aktif)</span>
+                          </span>
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-900/40 dark:text-amber-300 dark:border-amber-800">
+                            <Globe className="w-3 h-3 text-amber-600 dark:text-amber-400" />
+                            <span>Baseline Dinamis &amp; Berkembang (Rev #{baselineStatus?.baselineRevision ?? 1})</span>
+                          </span>
                         </div>
                         <p className="text-[11px] text-slate-600 dark:text-slate-300 mt-1 max-w-3xl">
-                          Seluruh data yang sudah terekam di database (game, kategori, pengguna & XP, skor leaderboard, sertifikat, testimoni, lisensi, pengaturan tampilan, dan log akses) dikunci sebagai baseline agar tidak pernah terhapus atau tertimpa ulang saat ada pengembangan kode atau pembaruan server.
+                          Data baseline bersifat <strong>dinamis dan terus berkembang otomatis</strong> mengikuti setiap akses pengguna dari seluruh dunia, penambahan sesi permainan, pencatatan skor baru, serta pembaruan atau unggahan game baru—tersinkron otomatis setiap <strong>1 menit</strong> dan setiap ada perubahan data.
                         </p>
                       </div>
-                      <button
-                        type="button"
-                        onClick={loadBackupSnapshots}
-                        className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100/60 text-xs font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-1 cursor-pointer transition"
-                      >
-                        <RefreshCw className="w-3 h-3" />
-                        <span>Perbarui Status</span>
-                      </button>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleSyncBaselineNow}
+                          disabled={isSyncingBaselineNow}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-xs font-bold text-white flex items-center gap-1.5 cursor-pointer transition shadow-sm disabled:opacity-50"
+                        >
+                          <RefreshCw className={`w-3.5 h-3.5 ${isSyncingBaselineNow ? 'animate-spin' : ''}`} />
+                          <span>{isSyncingBaselineNow ? 'Menyinkronkan...' : 'Sinkronkan Baseline Sekarang'}</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={loadBackupSnapshots}
+                          className="px-3 py-1.5 rounded-xl bg-white dark:bg-slate-900 border border-emerald-200 dark:border-emerald-800 hover:bg-emerald-100/60 text-xs font-semibold text-emerald-700 dark:text-emerald-300 flex items-center gap-1 cursor-pointer transition"
+                        >
+                          <RefreshCw className="w-3 h-3" />
+                          <span>Perbarui Status</span>
+                        </button>
+                      </div>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+                    <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
                       <div className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800">
-                        <div className="text-[10px] font-bold uppercase text-slate-400">Game</div>
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Game Aktif</div>
                         <div className="text-base font-black text-amber-600 font-mono">{baselineStatus?.counts.games ?? games.length}</div>
+                      </div>
+                      <div className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800">
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Total Main</div>
+                        <div className="text-base font-black text-rose-600 font-mono">{baselineStatus?.growthMetrics?.totalGamePlays ?? totalGamePlayers}</div>
                       </div>
                       <div className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800">
                         <div className="text-[10px] font-bold uppercase text-slate-400">Kategori</div>
@@ -4125,16 +4248,45 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
                         <div className="text-base font-black text-orange-600 font-mono">{baselineStatus?.counts.leaderboard ?? '-'}</div>
                       </div>
                       <div className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800">
-                        <div className="text-[10px] font-bold uppercase text-slate-400">Sertifikat</div>
-                        <div className="text-base font-black text-sky-600 font-mono">{baselineStatus?.counts.certificates ?? certificates.length}</div>
-                      </div>
-                      <div className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800">
                         <div className="text-[10px] font-bold uppercase text-slate-400">Testimoni</div>
                         <div className="text-base font-black text-purple-600 font-mono">{baselineStatus?.counts.testimonials ?? testimonials.length}</div>
                       </div>
                       <div className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800">
                         <div className="text-[10px] font-bold uppercase text-slate-400">Log Akses</div>
                         <div className="text-base font-black text-slate-700 dark:text-slate-200 font-mono">{baselineStatus?.counts.accessLogs ?? '-'}</div>
+                      </div>
+                      <div className="p-2.5 rounded-2xl bg-white dark:bg-slate-900 border border-emerald-100 dark:border-slate-800">
+                        <div className="text-[10px] font-bold uppercase text-slate-400">Negara / IP</div>
+                        <div className="text-base font-black text-teal-600 font-mono">
+                          {baselineStatus?.growthMetrics?.uniqueCountries ?? 1} / {baselineStatus?.growthMetrics?.uniqueIps ?? 2}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Worldwide Reach & Latest Baseline Evolution Strip */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] text-slate-700 dark:text-slate-200 bg-emerald-100/60 dark:bg-emerald-900/30 px-3.5 py-2 rounded-2xl border border-emerald-200/80 dark:border-emerald-800/60">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-emerald-800 dark:text-emerald-300">🌏 Jangkauan Akses Dunia:</span>
+                        {baselineStatus?.growthMetrics?.countriesList && baselineStatus.growthMetrics.countriesList.length > 0 ? (
+                          baselineStatus.growthMetrics.countriesList.map((c) => (
+                            <span
+                              key={`${c.code}-${c.name}`}
+                              className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-white dark:bg-slate-900 border border-emerald-200 dark:border-slate-700 text-[10px] font-bold"
+                            >
+                              <span>{resolveCountryFlagEmoji(c.code, c.name)}</span>
+                              <span>{c.name}</span>
+                              <span className="text-emerald-600 dark:text-emerald-400 font-mono">({c.count})</span>
+                            </span>
+                          ))
+                        ) : (
+                          <span className="text-xs font-semibold">🇮🇩 Indonesia</span>
+                        )}
+                      </div>
+                      <div>
+                        <span className="font-semibold">Perkembangan Terakhir:</span>{' '}
+                        <span className="font-bold text-emerald-800 dark:text-emerald-300">
+                          {baselineStatus?.lastGrowthReason || 'Baseline Berkembang Sesuai Akses & Pembaruan Game'}
+                        </span>
                       </div>
                     </div>
 
@@ -4145,12 +4297,25 @@ export const AdminHubModal: React.FC<AdminHubModalProps> = ({
                           {baselineStatus?.latestBaselineSnapshot?.filename || 'Otomatis dibuat saat ada data terekam'}
                         </span>
                       </div>
-                      {baselineStatus?.baselineEstablishedAt && (
+                      <div className="flex flex-wrap items-center gap-3">
                         <div>
-                          <span className="font-semibold">Baseline Aktif Sejak:</span>{' '}
-                          <span className="font-mono">{new Date(baselineStatus.baselineEstablishedAt).toLocaleString('id-ID')}</span>
+                          <span className="font-semibold">Interval:</span>{' '}
+                          <span className="font-mono text-sky-700 dark:text-sky-300 font-bold">
+                            Setiap 1 Menit ({baselineStatus?.autoSyncIntervalSeconds ?? 60} Detik)
+                          </span>
                         </div>
-                      )}
+                        <div>
+                          <span className="font-semibold">Terakhir Sinkron:</span>{' '}
+                          <span className="font-mono text-emerald-700 dark:text-emerald-300 font-bold">
+                            {baselineStatus?.lastAutoSyncAt
+                              ? new Date(baselineStatus.lastAutoSyncAt).toLocaleTimeString('id-ID')
+                              : 'Baru saja'}
+                          </span>
+                        </div>
+                        <div className="px-2 py-0.5 rounded-lg bg-emerald-100/80 dark:bg-emerald-900/40 text-emerald-800 dark:text-emerald-200 font-mono font-bold">
+                          Sinkron Berikutnya: {baselineCountdownSec} dtk
+                        </div>
+                      </div>
                     </div>
 
                     <form onSubmit={handleSyncFromPublishedUrl} className="pt-1 space-y-2">

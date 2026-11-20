@@ -9,17 +9,8 @@ import { api } from './services/api';
 import { Navbar } from './components/Navbar';
 import { HeroSection } from './components/HeroSection';
 import { CategoryBar } from './components/CategoryBar';
-import { GameCard } from './components/GameCard';
-import { CatalogView } from './components/CatalogView';
-import { FeaturedView } from './components/FeaturedView';
-import { LeaderboardView } from './components/LeaderboardView';
-import { TestimonialsView } from './components/TestimonialsView';
-import { GamePlayerModal } from './components/GamePlayerModal';
-import { AdminHubModal } from './components/AdminHubModal';
-import { CertificateVerifierModal } from './components/CertificateVerifierModal';
-import { AuthModal } from './components/AuthModal';
-import { ArrowRight, Trophy, Sparkles, Gamepad2 } from 'lucide-react';
-import { playBellSound } from './utils/soundEffects';
+import { LazySection } from './components/LazySection';
+import { RoutePageSkeleton, ModalChunkFallback } from './components/RouteFallback';
 import { sanitizeSelectedCategory } from './utils/categorySync';
 import {
   hasSyncRevisionChanged,
@@ -28,6 +19,41 @@ import {
   shouldAutoRefreshOnVisibility,
 } from './utils/realtimeSync';
 import { filterActiveGamesLeaderboard } from './utils/scoreAutoSync';
+import {
+  AppRouteView,
+  getRouteHashForView,
+  isValidRouteView,
+  parseViewFromLocation,
+} from './utils/routeLazySync';
+
+// Route-based Code Splitting & On-Demand Lazy Chunks (React.lazy)
+const HomeShowcaseSection = React.lazy(() =>
+  import('./components/HomeShowcaseSection').then((m) => ({ default: m.HomeShowcaseSection }))
+);
+const CatalogView = React.lazy(() =>
+  import('./components/CatalogView').then((m) => ({ default: m.CatalogView }))
+);
+const FeaturedView = React.lazy(() =>
+  import('./components/FeaturedView').then((m) => ({ default: m.FeaturedView }))
+);
+const LeaderboardView = React.lazy(() =>
+  import('./components/LeaderboardView').then((m) => ({ default: m.LeaderboardView }))
+);
+const TestimonialsView = React.lazy(() =>
+  import('./components/TestimonialsView').then((m) => ({ default: m.TestimonialsView }))
+);
+const GamePlayerModal = React.lazy(() =>
+  import('./components/GamePlayerModal').then((m) => ({ default: m.GamePlayerModal }))
+);
+const AdminHubModal = React.lazy(() =>
+  import('./components/AdminHubModal').then((m) => ({ default: m.AdminHubModal }))
+);
+const CertificateVerifierModal = React.lazy(() =>
+  import('./components/CertificateVerifierModal').then((m) => ({ default: m.CertificateVerifierModal }))
+);
+const AuthModal = React.lazy(() =>
+  import('./components/AuthModal').then((m) => ({ default: m.AuthModal }))
+);
 
 interface Toast {
   id: number;
@@ -36,9 +62,41 @@ interface Toast {
 }
 
 export default function App() {
-  // Navigation & View
-  const [currentView, setCurrentView] = React.useState<string>('home');
+  // Navigation & Route View (synchronized with URL hash for route-based code splitting)
+  const [currentView, setCurrentView] = React.useState<AppRouteView>(() => {
+    if (typeof window !== 'undefined') {
+      return parseViewFromLocation(window.location.hash, window.location.pathname);
+    }
+    return 'home';
+  });
   const [selectedCategory, setSelectedCategory] = React.useState<string>('all');
+
+  const navigateToView = React.useCallback((view: string, scrollTop = true) => {
+    const nextView: AppRouteView = isValidRouteView(view) ? view : 'home';
+    setCurrentView(nextView);
+    if (typeof window !== 'undefined') {
+      const targetHash = getRouteHashForView(nextView);
+      if (window.location.hash !== targetHash) {
+        window.history.pushState(null, '', targetHash);
+      }
+      if (scrollTop) {
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      }
+    }
+  }, []);
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const syncFromUrl = () => {
+      setCurrentView(parseViewFromLocation(window.location.hash, window.location.pathname));
+    };
+    window.addEventListener('hashchange', syncFromUrl);
+    window.addEventListener('popstate', syncFromUrl);
+    return () => {
+      window.removeEventListener('hashchange', syncFromUrl);
+      window.removeEventListener('popstate', syncFromUrl);
+    };
+  }, []);
 
   // Theme
   const [isDark, setIsDark] = React.useState<boolean>(() => {
@@ -162,24 +220,28 @@ export default function App() {
         api.getCategories(),
         api.getLeaderboard(),
         api.getTestimonials(true),
-        api.getLicenses(),
-        api.getCertificates(),
+        api.getLicenses().catch(() => [] as License[]),
+        api.getCertificates().catch(() => [] as Certificate[]),
         api.getSettings(),
         api.getStats(),
-        api.getAuditLogs(),
+        api.getAuditLogs().catch(() => [] as AuditLog[]),
         api.getSyncState().catch(() => null),
         activeSessionUser ? api.getUsers().catch(() => null) : Promise.resolve(null),
       ]);
 
-      setGames(fetchedGames);
-      setCategories(fetchedCategories);
-      setLeaderboard(fetchedLeaderboard);
-      setTestimonials(fetchedTestimonials);
-      setLicenses(fetchedLicenses);
-      setCertificates(fetchedCertificates);
-      setSettings(fetchedSettings);
-      setStats(fetchedStats);
-      setAuditLogs(fetchedAuditLogs);
+      setGames(Array.isArray(fetchedGames) ? fetchedGames : []);
+      setCategories(Array.isArray(fetchedCategories) ? fetchedCategories : []);
+      setLeaderboard(Array.isArray(fetchedLeaderboard) ? fetchedLeaderboard : []);
+      setTestimonials(Array.isArray(fetchedTestimonials) ? fetchedTestimonials : []);
+      setLicenses(Array.isArray(fetchedLicenses) ? fetchedLicenses : []);
+      setCertificates(Array.isArray(fetchedCertificates) ? fetchedCertificates : []);
+      if (fetchedSettings && typeof fetchedSettings === 'object') {
+        setSettings(fetchedSettings);
+      }
+      if (fetchedStats && typeof fetchedStats === 'object') {
+        setStats(fetchedStats);
+      }
+      setAuditLogs(Array.isArray(fetchedAuditLogs) ? fetchedAuditLogs : []);
 
       if (fetchedSyncState && typeof fetchedSyncState.revision === 'number') {
         lastRevisionRef.current = fetchedSyncState.revision;
@@ -201,6 +263,13 @@ export default function App() {
     } catch (err) {
       console.error('Error loading data from SQL backend:', err);
       showToast('Gagal memuat data dari server SQL. Mencoba sinkronisasi ulang...', 'warning');
+      if (!hasLoadedOnceRef.current) {
+        window.setTimeout(() => {
+          if (!hasLoadedOnceRef.current) {
+            void loadAllData();
+          }
+        }, 2500);
+      }
     } finally {
       setIsLoading(false);
       inFlightLoadRef.current = false;
@@ -211,9 +280,24 @@ export default function App() {
     }
   }, [showToast]);
 
-  // Initial fetch, Realtime SSE listener, and multi-computer fallback auto-sync
+  // Initial fetch, worldwide visitor tracking, Realtime SSE listener, and multi-computer fallback auto-sync
   React.useEffect(() => {
     void loadAllData();
+
+    // Record global website visit so baseline data evolves with worldwide user accesses
+    const activeUser = currentUserRef.current;
+    void api
+      .recordSiteVisit({
+        user: activeUser
+          ? { id: activeUser.id, name: activeUser.name, role: activeUser.role }
+          : undefined,
+        clientInfo: {
+          screen: typeof window !== 'undefined' ? `${window.innerWidth}x${window.innerHeight}` : undefined,
+          timezone: typeof Intl !== 'undefined' ? Intl.DateTimeFormat().resolvedOptions().timeZone : undefined,
+          language: typeof navigator !== 'undefined' ? navigator.language : undefined,
+        },
+      })
+      .catch(() => {});
 
     const syncIfRevisionChanged = async () => {
       try {
@@ -406,10 +490,7 @@ export default function App() {
       {/* Top Navigation */}
       <Navbar
         currentView={currentView}
-        onNavigate={(v) => {
-          setCurrentView(v);
-          window.scrollTo({ top: 0, behavior: 'smooth' });
-        }}
+        onNavigate={(v) => navigateToView(v, true)}
         isDark={isDark}
         onToggleTheme={toggleTheme}
         currentUser={currentUser}
@@ -419,26 +500,20 @@ export default function App() {
         onOpenVerifier={() => setVerifierModalOpen(true)}
       />
 
-      {/* Main Views Container */}
+      {/* Main Views Container (Route-based Code Splitting via React.lazy + Suspense) */}
       <main className="flex-grow">
         {/* VIEW 1: HOME */}
         {currentView === 'home' && (
           <div className="space-y-16 pb-16">
-            {/* Hero Section */}
+            {/* Above-the-Fold Hero Section (Eagerly loaded for instant FCP) */}
             <HeroSection
               settings={settings}
               stats={stats}
-              onExplore={() => {
-                setCurrentView('catalog');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
-              onOpenLeaderboard={() => {
-                setCurrentView('leaderboard');
-                window.scrollTo({ top: 0, behavior: 'smooth' });
-              }}
+              onExplore={() => navigateToView('catalog', true)}
+              onOpenLeaderboard={() => navigateToView('leaderboard', true)}
             />
 
-            {/* Buddhist Categories Strip */}
+            {/* Manual Categories Strip */}
             <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
               <CategoryBar
                 categories={categories}
@@ -446,129 +521,69 @@ export default function App() {
                 selectedCategory={selectedCategory}
                 onSelectCategory={(catName) => {
                   setSelectedCategory(catName);
-                  setCurrentView('catalog');
-                  window.scrollTo({ top: 0, behavior: 'smooth' });
+                  navigateToView('catalog', true);
                 }}
               />
             </div>
 
-            {/* Featured Games Showcase */}
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-6">
-              <div className="flex items-center justify-between">
-                <div>
-                  <h2 className="font-heading font-extrabold text-2xl text-slate-900 dark:text-white">
-                    Permainan Edukasi Pilihan Terbaik
-                  </h2>
-                  <p className="text-xs text-slate-500">
-                    Game interaktif paling disukai peserta didik dengan rating tertinggi
-                  </p>
-                </div>
-
-                <button
-                  onClick={() => {
-                    playBellSound();
-                    setCurrentView('catalog');
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }}
-                  className="text-xs font-semibold text-amber-600 dark:text-amber-400 hover:underline flex items-center gap-1 cursor-pointer"
-                >
-                  <span>Lihat Semua ({activeGames.length})</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </button>
-              </div>
-
-              {featuredGames.length === 0 ? (
-                <div className="bg-white dark:bg-slate-900 rounded-3xl border border-dashed border-slate-300 dark:border-slate-700 p-10 text-center space-y-2.5">
-                  <div className="w-12 h-12 rounded-2xl bg-amber-500/10 text-amber-600 dark:text-amber-400 flex items-center justify-center mx-auto">
-                    <Gamepad2 className="w-6 h-6" />
-                  </div>
-                  <h3 className="font-heading font-bold text-sm text-slate-800 dark:text-slate-200">
-                    Belum Ada Permainan yang Diunggah
-                  </h3>
-                  <p className="text-xs text-slate-500 dark:text-slate-400 max-w-md mx-auto">
-                    Daftar permainan edukasi masih kosong. Pengelola dapat mengunggah permainan baru melalui Admin Hub agar langsung muncul dan tersinkronisasi dengan kategorinya.
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {featuredGames.slice(0, 6).map((game) => (
-                    <GameCard
-                      key={game.id}
-                      game={game}
-                      onPlay={(g) => setActiveGame(g)}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Live Leaderboard Snippet on Homepage */}
-            <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-              <div className="bg-gradient-to-r from-amber-500/10 via-orange-500/10 to-transparent p-6 sm:p-8 rounded-3xl border border-amber-500/20 flex flex-col md:flex-row items-center justify-between gap-6">
-                <div className="space-y-2 text-center md:text-left">
-                  <div className="inline-flex items-center gap-2 text-amber-700 dark:text-amber-400 text-xs font-bold">
-                    <Trophy className="w-4 h-4 text-amber-500" />
-                    <span>Papan Peringkat Real-Time Nasional</span>
-                  </div>
-                  <h3 className="font-heading font-extrabold text-xl sm:text-2xl text-slate-900 dark:text-white">
-                    Jadilah Juara Kebijaksanaan Dharma Hari Ini!
-                  </h3>
-                  <p className="text-xs sm:text-sm text-slate-600 dark:text-slate-300 max-w-xl">
-                    Kumpulkan XP dari setiap pertanyaan kuis dan tantangan konsentrasi memory card. Posisi juara 1 berhak mendapatkan gelar Emas Paramita dan sertifikat digital resmi.
-                  </p>
-                </div>
-
-                <button
-                  onClick={() => {
-                    playBellSound();
-                    setCurrentView('leaderboard');
-                    window.scrollTo({ top: 0, behavior: 'smooth' });
-                  }}
-                  className="px-6 py-3.5 rounded-2xl bg-gradient-to-r from-amber-600 to-orange-600 text-white font-bold text-xs shadow-lg shadow-amber-600/25 hover:shadow-xl transition cursor-pointer whitespace-nowrap flex items-center gap-2"
-                >
-                  <Sparkles className="w-4 h-4" />
-                  <span>Buka Papan Peringkat Lengkap</span>
-                </button>
-              </div>
-            </div>
+            {/* Scroll-based Lazy Loaded Below-the-Fold Showcase (IntersectionObserver + React.lazy) */}
+            <LazySection id="home-showcase-lazy" rootMargin="240px 0px" minHeightClass="min-h-[340px]">
+              <React.Suspense fallback={<RoutePageSkeleton label="Memuat permainan pilihan..." />}>
+                <HomeShowcaseSection
+                  featuredGames={featuredGames}
+                  totalActiveGames={activeGames.length}
+                  onPlayGame={(g) => setActiveGame(g)}
+                  onOpenCatalog={() => navigateToView('catalog', true)}
+                  onOpenLeaderboard={() => navigateToView('leaderboard', true)}
+                />
+              </React.Suspense>
+            </LazySection>
           </div>
         )}
 
-        {/* VIEW 2: CATALOG GAMES */}
+        {/* VIEW 2: CATALOG GAMES (Lazy Route Chunk) */}
         {currentView === 'catalog' && (
-          <CatalogView
-            games={activeGames}
-            categories={categories}
-            selectedCategory={selectedCategory}
-            onSelectCategory={setSelectedCategory}
-            onPlay={(g) => setActiveGame(g)}
-          />
+          <React.Suspense fallback={<RoutePageSkeleton label="Memuat katalog permainan..." />}>
+            <CatalogView
+              games={activeGames}
+              categories={categories}
+              selectedCategory={selectedCategory}
+              onSelectCategory={setSelectedCategory}
+              onPlay={(g) => setActiveGame(g)}
+            />
+          </React.Suspense>
         )}
 
-        {/* VIEW 3: FEATURED GAMES */}
+        {/* VIEW 3: FEATURED GAMES (Lazy Route Chunk) */}
         {currentView === 'featured' && (
-          <FeaturedView
-            games={activeGames}
-            onPlay={(g) => setActiveGame(g)}
-          />
+          <React.Suspense fallback={<RoutePageSkeleton label="Memuat game unggulan..." />}>
+            <FeaturedView
+              games={activeGames}
+              onPlay={(g) => setActiveGame(g)}
+            />
+          </React.Suspense>
         )}
 
-        {/* VIEW 4: REAL-TIME LEADERBOARD */}
+        {/* VIEW 4: REAL-TIME LEADERBOARD (Lazy Route Chunk) */}
         {currentView === 'leaderboard' && (
-          <LeaderboardView
-            entries={activeLeaderboard}
-            isLoading={isLoading}
-            onRefresh={loadAllData}
-          />
+          <React.Suspense fallback={<RoutePageSkeleton label="Memuat papan peringkat real-time..." />}>
+            <LeaderboardView
+              entries={activeLeaderboard}
+              isLoading={isLoading}
+              onRefresh={loadAllData}
+            />
+          </React.Suspense>
         )}
 
-        {/* VIEW 5: TESTIMONIALS */}
+        {/* VIEW 5: TESTIMONIALS (Lazy Route Chunk) */}
         {currentView === 'testimonials' && (
-          <TestimonialsView
-            testimonials={testimonials.filter((t) => t.status === 'approved')}
-            games={activeGames}
-            onSubmit={handleSubmitTestimonial}
-          />
+          <React.Suspense fallback={<RoutePageSkeleton label="Memuat ulasan & testimoni..." />}>
+            <TestimonialsView
+              testimonials={testimonials.filter((t) => t.status === 'approved')}
+              games={activeGames}
+              onSubmit={handleSubmitTestimonial}
+            />
+          </React.Suspense>
         )}
       </main>
 
@@ -604,43 +619,57 @@ export default function App() {
         </div>
       </footer>
 
-      {/* GAME PLAYER FULLSCREEN MODAL */}
+      {/* GAME PLAYER FULLSCREEN MODAL (Loaded On-Demand) */}
       {activeGame && (
-        <GamePlayerModal
-          game={activeGame}
-          onClose={() => setActiveGame(null)}
-          onSubmitScore={handleSubmitScore}
-          playerName={currentUser?.name || 'Tamu Dharma'}
-          currentUser={currentUser}
-        />
+        <React.Suspense fallback={<ModalChunkFallback label="Memuat pemutar permainan..." />}>
+          <GamePlayerModal
+            game={activeGame}
+            onClose={() => setActiveGame(null)}
+            onSubmitScore={handleSubmitScore}
+            playerName={currentUser?.name || 'Tamu Dharma'}
+            currentUser={currentUser}
+          />
+        </React.Suspense>
       )}
 
-      {/* ADMIN HUB STUDIO PRO MODAL */}
-      <AdminHubModal
-        isOpen={adminModalOpen}
-        onClose={() => setAdminModalOpen(false)}
-        games={games}
-        categories={categories}
-        testimonials={testimonials}
-        licenses={licenses}
-        certificates={certificates}
-        settings={settings}
-        auditLogs={auditLogs}
-        onDataChanged={loadAllData}
-      />
+      {/* ADMIN HUB STUDIO PRO MODAL (Loaded On-Demand Only When Opened) */}
+      {adminModalOpen && (
+        <React.Suspense fallback={<ModalChunkFallback label="Memuat Admin Hub Studio Pro..." />}>
+          <AdminHubModal
+            isOpen={adminModalOpen}
+            onClose={() => setAdminModalOpen(false)}
+            games={games}
+            categories={categories}
+            testimonials={testimonials}
+            licenses={licenses}
+            certificates={certificates}
+            settings={settings}
+            auditLogs={auditLogs}
+            onDataChanged={loadAllData}
+          />
+        </React.Suspense>
+      )}
 
-      {/* CERTIFICATE VERIFIER MODAL */}
-      <CertificateVerifierModal
-        isOpen={verifierModalOpen}
-        onClose={() => setVerifierModalOpen(false)}
-      />
+      {/* CERTIFICATE VERIFIER MODAL (Loaded On-Demand) */}
+      {verifierModalOpen && (
+        <React.Suspense fallback={<ModalChunkFallback label="Memuat verifikasi sertifikat..." />}>
+          <CertificateVerifierModal
+            isOpen={verifierModalOpen}
+            onClose={() => setVerifierModalOpen(false)}
+          />
+        </React.Suspense>
+      )}
 
-      {/* USER AUTH MODAL */}
-      <AuthModal
-        isOpen={authModalOpen}
-        onClose={() => setAuthModalOpen(false)}
-        onLoginSuccess={handleLoginSuccess}
-      />
+      {/* USER AUTH MODAL (Loaded On-Demand) */}
+      {authModalOpen && (
+        <React.Suspense fallback={<ModalChunkFallback label="Memuat halaman masuk..." />}>
+          <AuthModal
+            isOpen={authModalOpen}
+            onClose={() => setAuthModalOpen(false)}
+            onLoginSuccess={handleLoginSuccess}
+          />
+        </React.Suspense>
+      )}
     </div>
   );
 }

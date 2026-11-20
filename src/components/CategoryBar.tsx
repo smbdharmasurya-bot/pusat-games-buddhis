@@ -77,7 +77,7 @@ export const CategoryBar: React.FC<CategoryBarProps> = ({
   const renderIcon = (iconStr: string) => {
     if (!iconStr) return <Sprout className="w-5 h-5" />;
     if (iconStr.startsWith('http') || iconStr.startsWith('data:image')) {
-      return <img src={iconStr} alt="Category Icon" className="w-6 h-6 object-contain rounded" />;
+      return <img src={iconStr} alt="Category Icon" loading="lazy" decoding="async" className="w-6 h-6 object-contain rounded" />;
     }
     return getLucideIcon(iconStr);
   };
@@ -87,10 +87,10 @@ export const CategoryBar: React.FC<CategoryBarProps> = ({
       <div className="flex items-center justify-between">
         <div>
           <h2 className="font-heading font-bold text-xl text-slate-900 dark:text-white">
-            Kategori Pembelajaran Buddhis
+            Kategori Permainan
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Pilih topik kurikulum Dharma sesuai tingkatan peserta didik
+            Pilih kategori pembelajaran yang dikelola secara manual sesuai jenjang atau topik
           </p>
         </div>
 

@@ -71,6 +71,7 @@ test('parseBackupPayload parses full backup JSON with games, icons, thumbnails, 
     licenses: 0,
     leaderboard: 0,
     users: 0,
+    accessLogs: 0,
   });
 });
 

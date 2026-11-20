@@ -98,6 +98,22 @@ export const HeroSection: React.FC<HeroSectionProps> = ({
               </div>
             </div>
           </div>
+
+          {/* Worldwide Dynamic Growth & Live Baseline Indicator */}
+          <div className="flex flex-wrap items-center justify-center lg:justify-start gap-2 pt-2">
+            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-xl bg-emerald-500/10 dark:bg-emerald-500/15 border border-emerald-500/25 text-emerald-800 dark:text-emerald-300 text-xs font-semibold">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>
+                🌏 Akses Global ({stats.totalCountries ?? 1} Negara · {stats.totalUniqueVisitors ?? 2} IP Unik)
+              </span>
+            </div>
+            <div className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/10 dark:bg-sky-500/15 border border-sky-500/25 text-sky-800 dark:text-sky-300 text-xs font-semibold">
+              <CheckCircle2 className="w-3.5 h-3.5 text-sky-500" />
+              <span>
+                Baseline Dinamis Berkembang (Rev #{stats.baselineRevision ?? 1})
+              </span>
+            </div>
+          </div>
         </div>
 
         {/* Right Graphic: Hero Circle Frame with Perimeter Semi-Circular Banners and Clean Center for Photo/Logo */}

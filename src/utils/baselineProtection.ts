@@ -1,5 +1,10 @@
 import { SiteSettings } from '../types';
 
+export const AUTO_BASELINE_SYNC_INTERVAL_MS = 60 * 1000; // 1 minute (60,000 ms)
+export const AUTO_BASELINE_SYNC_INTERVAL_SECONDS = 60;
+export const DEFAULT_PUBLISHED_SYNC_URL =
+  'https://ais-pre-xhwkshuuvdxnrrph6r3vvw-42774090488.asia-east1.run.app';
+
 export interface SeedRowCounts {
   users: number;
   certificates: number;
@@ -14,6 +19,15 @@ export interface InitialSeedDecision {
   seedCertificates: boolean;
   seedUsers: boolean;
   seedSettings: boolean;
+}
+
+export interface AutoBaselineSnapshotCheckParams {
+  lastSnapshotMtimeMs: number;
+  nowMs: number;
+  lastSyncedRevision?: number | null;
+  currentRevision?: number | null;
+  intervalMs?: number;
+  forceCreate?: boolean;
 }
 
 /**
@@ -43,6 +57,57 @@ export function shouldRunInitialSeed(
     seedUsers: counts.users === 0,
     seedSettings: counts.siteSettings === 0,
   };
+}
+
+/**
+ * Determines whether a new `auto-baseline_*.db` snapshot should be created
+ * on the 1-minute automatic synchronization schedule or when data revision changes.
+ */
+export function shouldCreateAutoBaselineSnapshot(
+  params: AutoBaselineSnapshotCheckParams
+): boolean {
+  if (params.forceCreate) {
+    return true;
+  }
+  const intervalMs =
+    typeof params.intervalMs === 'number' && params.intervalMs > 0
+      ? params.intervalMs
+      : AUTO_BASELINE_SYNC_INTERVAL_MS;
+
+  if (!params.lastSnapshotMtimeMs || params.lastSnapshotMtimeMs <= 0) {
+    return true;
+  }
+
+  if (
+    typeof params.currentRevision === 'number' &&
+    typeof params.lastSyncedRevision === 'number' &&
+    params.currentRevision !== params.lastSyncedRevision
+  ) {
+    return true;
+  }
+
+  return params.nowMs - params.lastSnapshotMtimeMs >= intervalMs;
+}
+
+/**
+ * Calculates remaining seconds (1..60) until the next automatic 1-minute baseline sync cycle.
+ */
+export function calculateNextAutoBaselineSyncSeconds(
+  lastSyncIso: string | null | undefined,
+  nowMs: number = Date.now(),
+  intervalMs: number = AUTO_BASELINE_SYNC_INTERVAL_MS
+): number {
+  const intervalSec = Math.max(1, Math.round(intervalMs / 1000));
+  if (!lastSyncIso) {
+    return intervalSec;
+  }
+  const parsedMs = Date.parse(lastSyncIso);
+  if (!Number.isFinite(parsedMs) || parsedMs <= 0) {
+    return intervalSec;
+  }
+  const elapsedMs = Math.max(0, nowMs - parsedMs);
+  const remainingMs = intervalMs - (elapsedMs % intervalMs);
+  return Math.max(1, Math.min(intervalSec, Math.ceil(remainingMs / 1000)));
 }
 
 /**
@@ -111,3 +176,97 @@ export function validatePublishedSyncUrl(rawUrl: string): string {
   }
   return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, '');
 }
+
+export interface BaselineGrowthVector {
+  games: number;
+  totalPlayers: number;
+  categories: number;
+  leaderboard: number;
+  users: number;
+  testimonials: number;
+  certificates: number;
+  accessLogs: number;
+  revision?: number;
+}
+
+/**
+ * Determines whether a backup/auto-baseline snapshot contains evolved data
+ * (more games, more total plays, more leaderboard entries, more real access logs,
+ * more users/testimonials, or a higher revision) that should be merged forward
+ * into the live baseline database on startup.
+ */
+export function hasSnapshotGrownBeyondCurrentBaseline(
+  current: BaselineGrowthVector,
+  snapshot: BaselineGrowthVector
+): boolean {
+  if (snapshot.games > current.games) return true;
+  if (snapshot.totalPlayers > current.totalPlayers) return true;
+  if (snapshot.categories > current.categories) return true;
+  if (snapshot.leaderboard > current.leaderboard) return true;
+  if (snapshot.users > current.users) return true;
+  if (snapshot.testimonials > current.testimonials) return true;
+  if (snapshot.certificates > current.certificates) return true;
+  if (snapshot.accessLogs > current.accessLogs) return true;
+  if (
+    typeof snapshot.revision === 'number' &&
+    typeof current.revision === 'number' &&
+    snapshot.revision > current.revision
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Maps a live website mutation event or user access into a human-readable
+ * Indonesian baseline evolution summary.
+ */
+export function resolveBaselineGrowthReason(event: string, data?: unknown): string {
+  const rec =
+    data && typeof data === 'object' && !Array.isArray(data)
+      ? (data as Record<string, unknown>)
+      : {};
+  const title = typeof rec.title === 'string' ? rec.title : typeof rec.gameTitle === 'string' ? rec.gameTitle : '';
+  const country = typeof rec.country === 'string' ? rec.country : '';
+
+  switch (event) {
+    case 'game:created':
+      return title ? `Unggah Game Baru: ${title}` : 'Unggah Game Baru';
+    case 'game:updated':
+      return title ? `Pembaruan Game: ${title}` : 'Pembaruan Game & Kurikulum';
+    case 'game:deleted':
+      return title ? `Penyesuaian Katalog Game: ${title}` : 'Penyesuaian Katalog Game';
+    case 'stats:updated':
+      if (title && country) {
+        return `Akses Pengguna Global (${country}) — ${title}`;
+      }
+      if (title) {
+        return `Akses Permainan: ${title}`;
+      }
+      if (country) {
+        return `Kunjungan Website Global (${country})`;
+      }
+      return 'Perkembangan Akses Pengguna Global';
+    case 'leaderboard:updated':
+      return title ? `Skor Baru Tercatat: ${title}` : 'Pembaruan Skor Papan Peringkat';
+    case 'user:created':
+    case 'user:updated':
+      return 'Pertumbuhan Profil & XP Pengguna';
+    case 'testimonial:created':
+    case 'testimonial:updated':
+      return 'Evaluasi & Testimoni Pengguna Baru';
+    case 'category:created':
+    case 'category:updated':
+      return 'Pembaruan Kategori Pembelajaran';
+    case 'certificate:created':
+    case 'certificate:updated':
+      return 'Pembaruan Arsip Sertifikat Dharma';
+    case 'settings:updated':
+      return 'Pembaruan Tampilan & Identitas Portal';
+    case 'backup:imported':
+      return 'Sinkronisasi & Penggabungan Data Terpublish';
+    default:
+      return 'Sinkronisasi Otomatis Baseline Aktif';
+  }
+}
+

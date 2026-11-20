@@ -4,7 +4,9 @@ import {
   isDummyAccessLog,
   isDummyAuditLog,
   normalizeClientIp,
+  PORTAL_VISIT_GAME_TITLE,
   resolveCountryFlagEmoji,
+  resolveWorldwideClientLocation,
   synthesizeRealAccessLogsFromLeaderboard,
 } from './accessLogSync.ts';
 
@@ -62,6 +64,42 @@ test('isDummyAccessLog detects automated test loops, HeadlessChrome, and deleted
     ),
     false
   );
+
+  assert.equal(
+    isDummyAccessLog(
+      {
+        gameTitle: PORTAL_VISIT_GAME_TITLE,
+        userName: 'Tamu Dharma',
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) Safari/605.1.15',
+      },
+      activeTitles
+    ),
+    false
+  );
+});
+
+test('resolveWorldwideClientLocation resolves worldwide visitors by headers, timezones, and locale tags', () => {
+  const fromHeader = resolveWorldwideClientLocation({
+    countryHeader: 'JP',
+    cityHeader: 'Kyoto',
+    timezone: 'Asia/Tokyo',
+  });
+  assert.deepEqual(fromHeader, { country: 'Jepang', code: 'JP', city: 'Kyoto' });
+
+  const fromTimezone = resolveWorldwideClientLocation({
+    timezone: 'Europe/Amsterdam',
+  });
+  assert.deepEqual(fromTimezone, { country: 'Belanda', code: 'NL', city: 'Amsterdam' });
+
+  const fromUsTimezone = resolveWorldwideClientLocation({
+    timezone: 'America/New_York',
+  });
+  assert.deepEqual(fromUsTimezone, { country: 'Amerika Serikat', code: 'US', city: 'New York' });
+
+  const fromLocale = resolveWorldwideClientLocation({
+    acceptLanguage: 'zh-TW,zh;q=0.9,en-US;q=0.8',
+  });
+  assert.deepEqual(fromLocale, { country: 'Taiwan', code: 'TW', city: 'Online' });
 });
 
 test('isDummyAuditLog identifies automated test audit logs while keeping real admin logs', () => {
@@ -159,3 +197,4 @@ test('synthesizeRealAccessLogsFromLeaderboard backfills missing real sessions fo
   const secondRun = synthesizeRealAccessLogsFromLeaderboard(leaderboardRows, activeGames, users, synthesized);
   assert.equal(secondRun.length, 0);
 });
+

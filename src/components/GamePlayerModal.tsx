@@ -350,6 +350,7 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
       clientInfo: {
         screen: `${window.innerWidth}x${window.innerHeight}`,
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        language: typeof navigator !== 'undefined' ? navigator.language : 'id-ID',
       },
     }).then((res) => {
       if (isMounted && res?.logId) {
@@ -740,12 +741,59 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
     confetti({ particleCount: 70, spread: 70 });
   };
 
+  const [loadedHtml5Code, setLoadedHtml5Code] = React.useState<{ gameId: number; code: string } | null>(null);
+  const [isLoadingHtml5, setIsLoadingHtml5] = React.useState(false);
+  const [html5LoadError, setHtml5LoadError] = React.useState<string | null>(null);
+  const [html5RetryNonce, setHtml5RetryNonce] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!game || game.type !== 'html5') {
+      setIsLoadingHtml5(false);
+      setHtml5LoadError(null);
+      return;
+    }
+
+    if (game.html5Code && game.html5Code.trim() !== '') {
+      setLoadedHtml5Code({ gameId: game.id, code: game.html5Code });
+      setIsLoadingHtml5(false);
+      setHtml5LoadError(null);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingHtml5(true);
+    setHtml5LoadError(null);
+    api
+      .getGameById(game.id)
+      .then((fullGame) => {
+        if (cancelled) return;
+        setLoadedHtml5Code({ gameId: game.id, code: fullGame.html5Code || '' });
+        setIsLoadingHtml5(false);
+      })
+      .catch((err) => {
+        if (cancelled) return;
+        setHtml5LoadError(err instanceof Error ? err.message : 'Gagal memuat paket permainan HTML5.');
+        setIsLoadingHtml5(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [game?.id, game?.type, game?.html5Code, html5RetryNonce]);
+
+  const effectiveHtml5Code =
+    game?.html5Code && game.html5Code.trim() !== ''
+      ? game.html5Code
+      : loadedHtml5Code && game && loadedHtml5Code.gameId === game.id
+      ? loadedHtml5Code.code
+      : '';
+
   const processedHtml = React.useMemo(() => {
-    if (game?.type === 'html5') {
-      return preparePortableHtml(game.html5Code || '', game.title);
+    if (game?.type === 'html5' && effectiveHtml5Code) {
+      return preparePortableHtml(effectiveHtml5Code, game.title);
     }
     return '';
-  }, [game?.type, game?.html5Code, game?.title]);
+  }, [game?.type, effectiveHtml5Code, game?.title]);
 
   if (!game) return null;
 
@@ -1198,14 +1246,35 @@ export const GamePlayerModal: React.FC<GamePlayerModalProps> = ({
                 : 'w-full max-w-[420px] mx-auto my-auto rounded-3xl border-4 border-slate-700 shadow-2xl h-[92vh]'
             }`}
           >
-            <iframe
-              key={`html5-${iframeKey}`}
-              srcDoc={processedHtml}
-              title={game.title}
-              sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads allow-pointer-lock allow-popups allow-popups-to-escape-sandbox"
-              allow="fullscreen; autoplay; gamepad; microphone; camera; clipboard-write; web-share"
-              className="w-full h-full flex-grow border-0 bg-slate-900"
-            />
+            {isLoadingHtml5 ? (
+              <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-300 p-6">
+                <div className="w-10 h-10 rounded-full border-4 border-amber-500/30 border-t-amber-400 animate-spin" />
+                <div className="text-sm font-semibold text-amber-300">Memuat paket permainan HTML5...</div>
+                <div className="text-xs text-slate-400">{game.title}</div>
+              </div>
+            ) : html5LoadError ? (
+              <div className="w-full h-full flex flex-col items-center justify-center gap-3 text-slate-200 p-6 text-center">
+                <AlertCircle className="w-10 h-10 text-rose-400" />
+                <div className="text-sm font-bold text-white">Gagal Memuat Permainan</div>
+                <div className="text-xs text-slate-400 max-w-md">{html5LoadError}</div>
+                <button
+                  type="button"
+                  onClick={() => setHtml5RetryNonce((n) => n + 1)}
+                  className="px-5 py-2.5 rounded-xl bg-amber-600 hover:bg-amber-700 text-white text-xs font-bold transition cursor-pointer"
+                >
+                  Coba Muat Ulang
+                </button>
+              </div>
+            ) : (
+              <iframe
+                key={`html5-${iframeKey}-${game.id}`}
+                srcDoc={processedHtml}
+                title={game.title}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-modals allow-downloads allow-pointer-lock allow-popups allow-popups-to-escape-sandbox"
+                allow="fullscreen; autoplay; gamepad; microphone; camera; clipboard-write; web-share"
+                className="w-full h-full flex-grow border-0 bg-slate-900"
+              />
+            )}
           </div>
         )}
 

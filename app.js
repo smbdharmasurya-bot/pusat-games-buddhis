@@ -12,6 +12,9 @@ import fs from "node:fs";
 import path from "node:path";
 
 // src/utils/baselineProtection.ts
+var AUTO_BASELINE_SYNC_INTERVAL_MS = 60 * 1e3;
+var AUTO_BASELINE_SYNC_INTERVAL_SECONDS = 60;
+var DEFAULT_PUBLISHED_SYNC_URL = "https://ais-pre-xhwkshuuvdxnrrph6r3vvw-42774090488.asia-east1.run.app";
 function shouldRunInitialSeed(initialSeedCompleted, counts) {
   if (initialSeedCompleted || counts.users > 0) {
     return {
@@ -29,6 +32,19 @@ function shouldRunInitialSeed(initialSeedCompleted, counts) {
     seedUsers: counts.users === 0,
     seedSettings: counts.siteSettings === 0
   };
+}
+function shouldCreateAutoBaselineSnapshot(params) {
+  if (params.forceCreate) {
+    return true;
+  }
+  const intervalMs = typeof params.intervalMs === "number" && params.intervalMs > 0 ? params.intervalMs : AUTO_BASELINE_SYNC_INTERVAL_MS;
+  if (!params.lastSnapshotMtimeMs || params.lastSnapshotMtimeMs <= 0) {
+    return true;
+  }
+  if (typeof params.currentRevision === "number" && typeof params.lastSyncedRevision === "number" && params.currentRevision !== params.lastSyncedRevision) {
+    return true;
+  }
+  return params.nowMs - params.lastSnapshotMtimeMs >= intervalMs;
 }
 function mergeExistingAndImportedSettings(existing, imported, mode) {
   if (mode === "replace") {
@@ -71,6 +87,64 @@ function validatePublishedSyncUrl(rawUrl) {
     throw new Error("URL harus menggunakan protokol https:// atau http://");
   }
   return `${parsed.origin}${parsed.pathname}`.replace(/\/+$/, "");
+}
+function hasSnapshotGrownBeyondCurrentBaseline(current, snapshot) {
+  if (snapshot.games > current.games) return true;
+  if (snapshot.totalPlayers > current.totalPlayers) return true;
+  if (snapshot.categories > current.categories) return true;
+  if (snapshot.leaderboard > current.leaderboard) return true;
+  if (snapshot.users > current.users) return true;
+  if (snapshot.testimonials > current.testimonials) return true;
+  if (snapshot.certificates > current.certificates) return true;
+  if (snapshot.accessLogs > current.accessLogs) return true;
+  if (typeof snapshot.revision === "number" && typeof current.revision === "number" && snapshot.revision > current.revision) {
+    return true;
+  }
+  return false;
+}
+function resolveBaselineGrowthReason(event, data) {
+  const rec = data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  const title = typeof rec.title === "string" ? rec.title : typeof rec.gameTitle === "string" ? rec.gameTitle : "";
+  const country = typeof rec.country === "string" ? rec.country : "";
+  switch (event) {
+    case "game:created":
+      return title ? `Unggah Game Baru: ${title}` : "Unggah Game Baru";
+    case "game:updated":
+      return title ? `Pembaruan Game: ${title}` : "Pembaruan Game & Kurikulum";
+    case "game:deleted":
+      return title ? `Penyesuaian Katalog Game: ${title}` : "Penyesuaian Katalog Game";
+    case "stats:updated":
+      if (title && country) {
+        return `Akses Pengguna Global (${country}) \u2014 ${title}`;
+      }
+      if (title) {
+        return `Akses Permainan: ${title}`;
+      }
+      if (country) {
+        return `Kunjungan Website Global (${country})`;
+      }
+      return "Perkembangan Akses Pengguna Global";
+    case "leaderboard:updated":
+      return title ? `Skor Baru Tercatat: ${title}` : "Pembaruan Skor Papan Peringkat";
+    case "user:created":
+    case "user:updated":
+      return "Pertumbuhan Profil & XP Pengguna";
+    case "testimonial:created":
+    case "testimonial:updated":
+      return "Evaluasi & Testimoni Pengguna Baru";
+    case "category:created":
+    case "category:updated":
+      return "Pembaruan Kategori Pembelajaran";
+    case "certificate:created":
+    case "certificate:updated":
+      return "Pembaruan Arsip Sertifikat Dharma";
+    case "settings:updated":
+      return "Pembaruan Tampilan & Identitas Portal";
+    case "backup:imported":
+      return "Sinkronisasi & Penggabungan Data Terpublish";
+    default:
+      return "Sinkronisasi Otomatis Baseline Aktif";
+  }
 }
 
 // src/utils/categorySync.ts
@@ -254,6 +328,33 @@ function normalizeUserRecord(raw) {
     role
   };
 }
+function normalizeAccessLogRecord(raw) {
+  const r = asRecord(raw);
+  if (!r) return null;
+  const gameTitle = str(r.gameTitle ?? r.game_title).trim();
+  const userName = str(r.userName ?? r.user_name).trim();
+  if (!gameTitle || !userName) return null;
+  return {
+    gameTitle,
+    gameCategory: str(r.gameCategory ?? r.game_category, "Umum") || "Umum",
+    userId: str(r.userId ?? r.user_id).trim() || null,
+    userName,
+    userRole: str(r.userRole ?? r.user_role, "tamu") || "tamu",
+    ipAddress: str(r.ipAddress ?? r.ip_address, "127.0.0.1") || "127.0.0.1",
+    deviceType: str(r.deviceType ?? r.device_type, "Desktop PC") || "Desktop PC",
+    deviceModel: str(r.deviceModel ?? r.device_model, "Desktop PC"),
+    browser: str(r.browser, "Browser Web") || "Browser Web",
+    os: str(r.os, "OS") || "OS",
+    screenResolution: str(r.screenResolution ?? r.screen_resolution),
+    country: str(r.country, "Indonesia") || "Indonesia",
+    countryCode: str(r.countryCode ?? r.country_code, "ID") || "ID",
+    city: str(r.city, "Nusantara") || "Nusantara",
+    userAgent: str(r.userAgent ?? r.user_agent),
+    durationSeconds: Math.max(0, Math.round(num(r.durationSeconds ?? r.duration_seconds, 0))),
+    completed: bool(r.completed, false),
+    createdAt: str(r.createdAt ?? r.created_at) || (/* @__PURE__ */ new Date()).toISOString()
+  };
+}
 function normalizeSettings(raw) {
   if (!raw) return {};
   if (Array.isArray(raw)) {
@@ -308,7 +409,8 @@ function parseBackupPayload(input) {
         testimonials: [],
         licenses: [],
         leaderboard: [],
-        users: []
+        users: [],
+        accessLogs: []
       };
     }
     if (first && first.name !== void 0 && first.slug !== void 0) {
@@ -320,7 +422,8 @@ function parseBackupPayload(input) {
         testimonials: [],
         licenses: [],
         leaderboard: [],
-        users: []
+        users: [],
+        accessLogs: []
       };
     }
     throw new Error("Struktur array JSON tidak dikenali sebagai daftar game atau kategori.");
@@ -338,7 +441,9 @@ function parseBackupPayload(input) {
   const licenses = Array.isArray(container.licenses) ? container.licenses.map(normalizeLicenseRecord).filter((x) => x !== null) : [];
   const leaderboard = Array.isArray(container.leaderboard) ? container.leaderboard.map(normalizeLeaderboardRecord).filter((x) => x !== null) : [];
   const users = Array.isArray(container.users) ? container.users.map(normalizeUserRecord).filter((x) => x !== null) : [];
-  const totalItems = games.length + categories.length + Object.keys(siteSettings).length + certificates.length + testimonials.length + licenses.length + leaderboard.length + users.length;
+  const accessAssetList = container.accessLogs ?? container.game_access_logs;
+  const accessLogs = Array.isArray(accessAssetList) ? accessAssetList.map(normalizeAccessLogRecord).filter((x) => x !== null) : [];
+  const totalItems = games.length + categories.length + Object.keys(siteSettings).length + certificates.length + testimonials.length + licenses.length + leaderboard.length + users.length + accessLogs.length;
   if (totalItems === 0) {
     throw new Error("Tidak ditemukan data game, kategori, pengaturan, sertifikat, atau entitas lain yang valid di dalam backup.");
   }
@@ -350,7 +455,8 @@ function parseBackupPayload(input) {
     testimonials,
     licenses,
     leaderboard,
-    users
+    users,
+    accessLogs
   };
 }
 function summarizeBackupPayload(data) {
@@ -363,7 +469,8 @@ function summarizeBackupPayload(data) {
     testimonials: source.testimonials?.length || 0,
     licenses: source.licenses?.length || 0,
     leaderboard: source.leaderboard?.length || 0,
-    users: source.users?.length || 0
+    users: source.users?.length || 0,
+    accessLogs: source.accessLogs?.length || 0
   };
 }
 function isValidSqliteHeader(bytes) {
@@ -412,6 +519,222 @@ var DUMMY_AUDIT_DETAILS_PATTERNS = [
   /Added category:\s*Sejarah Vihara/i,
   /from game upload:\s*(Sila & Etika|Etika Dharma|Dharma Dasar)/i
 ];
+var PORTAL_VISIT_GAME_TITLE = "Portal Website Pusat Games Buddhis";
+var PORTAL_VISIT_CATEGORY = "Akses Portal Global";
+var WORLD_COUNTRY_NAMES_ID = {
+  ID: "Indonesia",
+  SG: "Singapura",
+  MY: "Malaysia",
+  TH: "Thailand",
+  VN: "Vietnam",
+  PH: "Filipina",
+  MM: "Myanmar",
+  KH: "Kamboja",
+  LA: "Laos",
+  BN: "Brunei Darussalam",
+  TL: "Timor Leste",
+  JP: "Jepang",
+  KR: "Korea Selatan",
+  TW: "Taiwan",
+  HK: "Hong Kong",
+  MO: "Makau",
+  CN: "Tiongkok",
+  IN: "India",
+  LK: "Sri Lanka",
+  NP: "Nepal",
+  BT: "Bhutan",
+  BD: "Bangladesh",
+  PK: "Pakistan",
+  AU: "Australia",
+  NZ: "Selandia Baru",
+  US: "Amerika Serikat",
+  CA: "Kanada",
+  MX: "Meksiko",
+  BR: "Brasil",
+  AR: "Argentina",
+  CL: "Chili",
+  CO: "Kolombia",
+  PE: "Peru",
+  GB: "Inggris (UK)",
+  DE: "Jerman",
+  FR: "Prancis",
+  NL: "Belanda",
+  BE: "Belgia",
+  CH: "Swiss",
+  AT: "Austria",
+  IT: "Italia",
+  ES: "Spanyol",
+  PT: "Portugal",
+  SE: "Swedia",
+  NO: "Norwegia",
+  DK: "Denmark",
+  FI: "Finlandia",
+  PL: "Polandia",
+  CZ: "Ceko",
+  RU: "Rusia",
+  TR: "Turki",
+  AE: "Uni Emirat Arab",
+  SA: "Arab Saudi",
+  QA: "Qatar",
+  IL: "Israel",
+  EG: "Mesir",
+  ZA: "Afrika Selatan",
+  NG: "Nigeria",
+  KE: "Kenya"
+};
+var TIMEZONE_TO_LOCATION = {
+  "Asia/Jakarta": { code: "ID", city: "Jakarta" },
+  "Asia/Pontianak": { code: "ID", city: "Pontianak" },
+  "Asia/Makassar": { code: "ID", city: "Makassar" },
+  "Asia/Ujung_Pandang": { code: "ID", city: "Makassar" },
+  "Asia/Jayapura": { code: "ID", city: "Jayapura" },
+  "Asia/Singapore": { code: "SG", city: "Singapore" },
+  "Asia/Kuala_Lumpur": { code: "MY", city: "Kuala Lumpur" },
+  "Asia/Kuching": { code: "MY", city: "Kuching" },
+  "Asia/Bangkok": { code: "TH", city: "Bangkok" },
+  "Asia/Ho_Chi_Minh": { code: "VN", city: "Ho Chi Minh City" },
+  "Asia/Saigon": { code: "VN", city: "Ho Chi Minh City" },
+  "Asia/Manila": { code: "PH", city: "Manila" },
+  "Asia/Yangon": { code: "MM", city: "Yangon" },
+  "Asia/Rangoon": { code: "MM", city: "Yangon" },
+  "Asia/Phnom_Penh": { code: "KH", city: "Phnom Penh" },
+  "Asia/Vientiane": { code: "LA", city: "Vientiane" },
+  "Asia/Brunei": { code: "BN", city: "Bandar Seri Begawan" },
+  "Asia/Dili": { code: "TL", city: "Dili" },
+  "Asia/Tokyo": { code: "JP", city: "Tokyo" },
+  "Asia/Seoul": { code: "KR", city: "Seoul" },
+  "Asia/Taipei": { code: "TW", city: "Taipei" },
+  "Asia/Hong_Kong": { code: "HK", city: "Hong Kong" },
+  "Asia/Macau": { code: "MO", city: "Macau" },
+  "Asia/Shanghai": { code: "CN", city: "Shanghai" },
+  "Asia/Chongqing": { code: "CN", city: "Chongqing" },
+  "Asia/Kolkata": { code: "IN", city: "Kolkata" },
+  "Asia/Calcutta": { code: "IN", city: "Kolkata" },
+  "Asia/Colombo": { code: "LK", city: "Colombo" },
+  "Asia/Kathmandu": { code: "NP", city: "Kathmandu" },
+  "Asia/Thimphu": { code: "BT", city: "Thimphu" },
+  "Asia/Dhaka": { code: "BD", city: "Dhaka" },
+  "Asia/Karachi": { code: "PK", city: "Karachi" },
+  "Asia/Dubai": { code: "AE", city: "Dubai" },
+  "Asia/Riyadh": { code: "SA", city: "Riyadh" },
+  "Asia/Qatar": { code: "QA", city: "Doha" },
+  "Australia/Sydney": { code: "AU", city: "Sydney" },
+  "Australia/Melbourne": { code: "AU", city: "Melbourne" },
+  "Australia/Brisbane": { code: "AU", city: "Brisbane" },
+  "Australia/Perth": { code: "AU", city: "Perth" },
+  "Australia/Adelaide": { code: "AU", city: "Adelaide" },
+  "Pacific/Auckland": { code: "NZ", city: "Auckland" },
+  "Europe/London": { code: "GB", city: "London" },
+  "Europe/Berlin": { code: "DE", city: "Berlin" },
+  "Europe/Paris": { code: "FR", city: "Paris" },
+  "Europe/Amsterdam": { code: "NL", city: "Amsterdam" },
+  "Europe/Brussels": { code: "BE", city: "Brussels" },
+  "Europe/Zurich": { code: "CH", city: "Zurich" },
+  "Europe/Vienna": { code: "AT", city: "Vienna" },
+  "Europe/Rome": { code: "IT", city: "Rome" },
+  "Europe/Madrid": { code: "ES", city: "Madrid" },
+  "Europe/Lisbon": { code: "PT", city: "Lisbon" },
+  "Europe/Stockholm": { code: "SE", city: "Stockholm" },
+  "Europe/Oslo": { code: "NO", city: "Oslo" },
+  "Europe/Copenhagen": { code: "DK", city: "Copenhagen" },
+  "Europe/Helsinki": { code: "FI", city: "Helsinki" },
+  "Europe/Warsaw": { code: "PL", city: "Warsaw" },
+  "Europe/Prague": { code: "CZ", city: "Prague" },
+  "Europe/Moscow": { code: "RU", city: "Moscow" },
+  "Europe/Istanbul": { code: "TR", city: "Istanbul" },
+  "America/New_York": { code: "US", city: "New York" },
+  "America/Los_Angeles": { code: "US", city: "Los Angeles" },
+  "America/Chicago": { code: "US", city: "Chicago" },
+  "America/Denver": { code: "US", city: "Denver" },
+  "America/Phoenix": { code: "US", city: "Phoenix" },
+  "America/Toronto": { code: "CA", city: "Toronto" },
+  "America/Vancouver": { code: "CA", city: "Vancouver" },
+  "America/Mexico_City": { code: "MX", city: "Mexico City" },
+  "America/Sao_Paulo": { code: "BR", city: "Sao Paulo" },
+  "America/Buenos_Aires": { code: "AR", city: "Buenos Aires" },
+  "America/Argentina/Buenos_Aires": { code: "AR", city: "Buenos Aires" },
+  "America/Santiago": { code: "CL", city: "Santiago" },
+  "America/Bogota": { code: "CO", city: "Bogota" },
+  "America/Lima": { code: "PE", city: "Lima" },
+  "Africa/Cairo": { code: "EG", city: "Cairo" },
+  "Africa/Johannesburg": { code: "ZA", city: "Johannesburg" },
+  "Africa/Lagos": { code: "NG", city: "Lagos" },
+  "Africa/Nairobi": { code: "KE", city: "Nairobi" }
+};
+function resolveCountryNameFromCode(code) {
+  const upper = code.trim().toUpperCase();
+  if (!upper || upper === "XX" || upper === "ZZ" || upper === "T1") return "";
+  if (WORLD_COUNTRY_NAMES_ID[upper]) {
+    return WORLD_COUNTRY_NAMES_ID[upper];
+  }
+  try {
+    const displayNames = new Intl.DisplayNames(["id", "en"], { type: "region" });
+    const resolved = displayNames.of(upper);
+    if (resolved && resolved !== upper) {
+      return resolved;
+    }
+  } catch {
+  }
+  return upper;
+}
+function resolveWorldwideClientLocation(input) {
+  const rawCode = String(input.countryHeader || "").trim().toUpperCase();
+  const rawCity = String(input.cityHeader || "").trim();
+  const tz = String(input.timezone || "").trim();
+  if (rawCode && /^[A-Z]{2}$/.test(rawCode) && rawCode !== "XX" && rawCode !== "ZZ") {
+    const countryName = resolveCountryNameFromCode(rawCode) || "Global";
+    const tzMatch = tz ? TIMEZONE_TO_LOCATION[tz] : void 0;
+    const city = rawCity || (tzMatch && tzMatch.code === rawCode ? tzMatch.city : "") || "Online";
+    return {
+      country: countryName,
+      code: rawCode,
+      city
+    };
+  }
+  if (tz) {
+    const directTz = TIMEZONE_TO_LOCATION[tz];
+    if (directTz) {
+      return {
+        country: resolveCountryNameFromCode(directTz.code) || "Global",
+        code: directTz.code,
+        city: rawCity || directTz.city
+      };
+    }
+    const parts = tz.split("/");
+    const region = parts[0];
+    const cityPart = (parts[parts.length - 1] || "Online").replace(/_/g, " ");
+    if (region === "Australia") {
+      return { country: "Australia", code: "AU", city: rawCity || cityPart };
+    }
+    if (region === "Europe") {
+      return { country: "Eropa", code: "EU", city: rawCity || cityPart };
+    }
+    if (region === "America") {
+      return { country: "Amerika Serikat", code: "US", city: rawCity || cityPart };
+    }
+  }
+  const lang = String(input.acceptLanguage || "").trim();
+  if (lang) {
+    const primaryTag = lang.split(",")[0]?.trim() || "";
+    const langMatch = primaryTag.match(/^[a-z]{2,3}[-_]([A-Z]{2})\b/i);
+    if (langMatch) {
+      const langCode = langMatch[1].toUpperCase();
+      const countryName = resolveCountryNameFromCode(langCode);
+      if (countryName) {
+        return {
+          country: countryName,
+          code: langCode,
+          city: rawCity || "Online"
+        };
+      }
+    }
+  }
+  return {
+    country: "Indonesia",
+    code: "ID",
+    city: rawCity || "Nusantara"
+  };
+}
 function isDummyAccessLog(log, activeGameTitles) {
   const title = String(log.gameTitle || "").trim();
   const userName = String(log.userName || "").trim();
@@ -429,6 +752,9 @@ function isDummyAccessLog(log, activeGameTitles) {
   }
   if (/HeadlessChrome|Playwright|Puppeteer/i.test(ua)) {
     return true;
+  }
+  if (title.toLowerCase() === PORTAL_VISIT_GAME_TITLE.toLowerCase()) {
+    return false;
   }
   if (activeGameTitles) {
     const normalizedActive = /* @__PURE__ */ new Set();
@@ -1247,16 +1573,36 @@ function getBaselineDatabaseCounts() {
     accessLogs: Number(db.prepare("SELECT COUNT(*) as count FROM game_access_logs").get().count || 0)
   };
 }
-function ensureAutoBaselineSnapshotOnStartup() {
+function upsertSyncMetadata(key, value) {
+  db.prepare(`
+    INSERT INTO sync_metadata (key, value, updated_at)
+    VALUES (?, ?, CURRENT_TIMESTAMP)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
+  `).run(key, value);
+}
+function getSyncMetadataValue(key) {
+  const row = db.prepare("SELECT value FROM sync_metadata WHERE key = ?").get(key);
+  return row?.value ?? null;
+}
+function ensureAutoBaselineSnapshotOnStartup(forceCreate = false, growthReason) {
   try {
+    if (growthReason && growthReason.trim()) {
+      upsertSyncMetadata("baseline_last_growth_reason", growthReason.trim());
+    }
     const counts = getBaselineDatabaseCounts();
     const hasRecordedData = counts.games > 0 || counts.categories > 0 || counts.leaderboard > 0 || counts.certificates > 0 || counts.testimonials > 0 || counts.accessLogs > 0 || counts.users > 4;
+    const nowMs = Date.now();
+    const nowIso = new Date(nowMs).toISOString();
+    const currentRevision = Number(getSyncMetadataValue("data_revision") || 1);
+    const lastSyncedRevisionRaw = getSyncMetadataValue("baseline_last_synced_revision");
+    const lastSyncedRevision = lastSyncedRevisionRaw !== null ? Number(lastSyncedRevisionRaw) : null;
     if (!hasRecordedData) {
+      upsertSyncMetadata("baseline_last_synced_at", nowIso);
       return null;
     }
     const existingFiles = fs.existsSync(BACKUP_DIR) ? fs.readdirSync(BACKUP_DIR).filter((f) => /^auto-baseline_.*\.db$/i.test(f)) : [];
-    const ONE_HOUR_MS = 60 * 60 * 1e3;
-    const now = Date.now();
+    let newestFile = null;
+    let newestMtimeMs = 0;
     for (const file of existingFiles) {
       const full = path.join(BACKUP_DIR, file);
       const stat = fs.statSync(full);
@@ -1267,13 +1613,31 @@ function ensureAutoBaselineSnapshotOnStartup() {
         }
         continue;
       }
-      if (now - stat.mtimeMs < ONE_HOUR_MS) {
-        return file;
+      if (stat.mtimeMs > newestMtimeMs) {
+        newestMtimeMs = stat.mtimeMs;
+        newestFile = file;
       }
     }
-    const filename = `auto-baseline_${formatSnapshotTimestamp()}.db`;
+    const needsNewSnapshot = shouldCreateAutoBaselineSnapshot({
+      lastSnapshotMtimeMs: newestMtimeMs,
+      nowMs,
+      lastSyncedRevision,
+      currentRevision,
+      intervalMs: AUTO_BASELINE_SYNC_INTERVAL_MS,
+      forceCreate
+    });
+    if (!needsNewSnapshot && newestFile) {
+      upsertSyncMetadata("baseline_last_synced_at", nowIso);
+      upsertSyncMetadata("baseline_last_synced_revision", String(currentRevision));
+      return newestFile;
+    }
+    const filename = `auto-baseline_${formatSnapshotTimestamp(new Date(nowMs))}.db`;
     const destPath = path.join(BACKUP_DIR, filename);
     const escapedPath = destPath.replace(/'/g, "''");
+    try {
+      db.exec("PRAGMA wal_checkpoint(PASSIVE);");
+    } catch {
+    }
     try {
       db.exec(`VACUUM INTO '${escapedPath}'`);
     } catch {
@@ -1310,14 +1674,220 @@ function ensureAutoBaselineSnapshotOnStartup() {
       } catch {
       }
     }
+    upsertSyncMetadata("baseline_last_synced_at", nowIso);
+    upsertSyncMetadata("baseline_last_synced_revision", String(currentRevision));
     return filename;
   } catch (err) {
     console.warn("Auto-baseline snapshot skipped:", err.message);
     return null;
   }
 }
+function getBaselineGrowthMetrics() {
+  const totalGamePlays = Number(
+    db.prepare("SELECT SUM(players) as s FROM games WHERE is_active = 1 AND (status IS NULL OR status != 'inactive')").get()?.s || 0
+  );
+  const totalAccessSessions = Number(
+    db.prepare("SELECT COUNT(*) as c FROM game_access_logs").get()?.c || 0
+  );
+  const uniqueCountries = Number(
+    db.prepare("SELECT COUNT(DISTINCT country) as c FROM game_access_logs").get()?.c || 0
+  );
+  const uniqueIps = Number(
+    db.prepare("SELECT COUNT(DISTINCT ip_address) as c FROM game_access_logs").get()?.c || 0
+  );
+  const countriesList = db.prepare(`
+      SELECT country as name, country_code as code, COUNT(*) as count
+      FROM game_access_logs
+      GROUP BY country, country_code
+      ORDER BY count DESC
+      LIMIT 12
+    `).all();
+  const lastGameUpdatedAt = db.prepare("SELECT MAX(updated_at) as m FROM games WHERE is_active = 1 AND (status IS NULL OR status != 'inactive')").get()?.m || null;
+  const lastAccessAt = db.prepare("SELECT MAX(created_at) as m FROM game_access_logs").get()?.m || null;
+  return {
+    totalGamePlays,
+    totalAccessSessions,
+    uniqueCountries,
+    uniqueIps,
+    countriesList,
+    lastGameUpdatedAt,
+    lastAccessAt
+  };
+}
+function getBaselineStatusPayload() {
+  const metaRows = db.prepare(
+    "SELECT key, value FROM sync_metadata WHERE key IN ('baseline_protection', 'initial_seed_completed', 'baseline_established_at', 'baseline_last_synced_at', 'baseline_auto_sync_enabled', 'published_sync_url', 'data_revision', 'baseline_last_growth_reason')"
+  ).all();
+  const metaMap = {};
+  for (const r of metaRows) {
+    metaMap[r.key] = r.value;
+  }
+  let latestBaselineSnapshot = null;
+  if (fs.existsSync(BACKUP_DIR)) {
+    const dbFiles = fs.readdirSync(BACKUP_DIR).filter((f) => f.endsWith(".db")).map((filename) => {
+      const stats = fs.statSync(path.join(BACKUP_DIR, filename));
+      return {
+        filename,
+        sizeBytes: stats.size,
+        createdAt: stats.mtime.toISOString()
+      };
+    }).filter((f) => f.sizeBytes > 0).sort((a, b) => a.createdAt < b.createdAt ? 1 : -1);
+    latestBaselineSnapshot = dbFiles.find((f) => /^auto-baseline_.*\.db$/i.test(f.filename)) || dbFiles[0] || null;
+  }
+  const lastAutoSyncAt = metaMap.baseline_last_synced_at || latestBaselineSnapshot?.createdAt || (/* @__PURE__ */ new Date()).toISOString();
+  const lastSyncMs = Date.parse(lastAutoSyncAt);
+  const nextAutoSyncAt = Number.isFinite(lastSyncMs) ? new Date(lastSyncMs + AUTO_BASELINE_SYNC_INTERVAL_MS).toISOString() : new Date(Date.now() + AUTO_BASELINE_SYNC_INTERVAL_MS).toISOString();
+  const baselineRevision = Number(metaMap.data_revision || 1);
+  return {
+    protected: metaMap.baseline_protection === "enabled",
+    initialSeedCompleted: metaMap.initial_seed_completed === "1",
+    baselineEstablishedAt: metaMap.baseline_established_at || null,
+    latestBaselineSnapshot,
+    autoSyncEnabled: metaMap.baseline_auto_sync_enabled !== "0",
+    autoSyncIntervalSeconds: AUTO_BASELINE_SYNC_INTERVAL_SECONDS,
+    lastAutoSyncAt,
+    nextAutoSyncAt,
+    publishedSyncUrl: metaMap.published_sync_url || DEFAULT_PUBLISHED_SYNC_URL,
+    baselineRevision: Number.isFinite(baselineRevision) && baselineRevision > 0 ? baselineRevision : 1,
+    lastGrowthReason: metaMap.baseline_last_growth_reason || "Baseline Berkembang Sesuai Akses Pengguna & Pembaruan Game",
+    growthMetrics: getBaselineGrowthMetrics(),
+    counts: getBaselineDatabaseCounts()
+  };
+}
+function reconcileGrowingBaselineOnStartup() {
+  try {
+    if (!fs.existsSync(BACKUP_DIR)) return;
+    const autoSnapshots = fs.readdirSync(BACKUP_DIR).filter((f) => /^auto-baseline_.*\.db$/i.test(f)).map((name) => {
+      const fullPath = path.join(BACKUP_DIR, name);
+      const stat = fs.statSync(fullPath);
+      return { name, fullPath, size: stat.size, mtimeMs: stat.mtimeMs };
+    }).filter((f) => f.size > 0).sort((a, b) => b.mtimeMs - a.mtimeMs);
+    if (autoSnapshots.length === 0) return;
+    const currentCounts = getBaselineDatabaseCounts();
+    const currentTotalPlayers = Number(
+      db.prepare("SELECT SUM(players) as s FROM games").get()?.s || 0
+    );
+    const currentRevision = Number(getSyncMetadataValue("data_revision") || 1);
+    const latestSnapPath = autoSnapshots[0].fullPath;
+    const snapDb = new DatabaseSync(latestSnapPath, { readOnly: true });
+    try {
+      const snapGamesCount = Number(snapDb.prepare("SELECT COUNT(*) as c FROM games").get()?.c || 0);
+      const snapTotalPlayers = Number(snapDb.prepare("SELECT SUM(players) as s FROM games").get()?.s || 0);
+      const snapCategoriesCount = Number(snapDb.prepare("SELECT COUNT(*) as c FROM categories").get()?.c || 0);
+      const snapLeaderboardCount = Number(snapDb.prepare("SELECT COUNT(*) as c FROM leaderboard").get()?.c || 0);
+      const snapUsersCount = Number(snapDb.prepare("SELECT COUNT(*) as c FROM users").get()?.c || 0);
+      const snapTestimonialsCount = Number(snapDb.prepare("SELECT COUNT(*) as c FROM testimonials").get()?.c || 0);
+      const snapCertificatesCount = Number(snapDb.prepare("SELECT COUNT(*) as c FROM certificates").get()?.c || 0);
+      const snapAccessLogsCount = Number(snapDb.prepare("SELECT COUNT(*) as c FROM game_access_logs").get()?.c || 0);
+      const snapRevisionRow = snapDb.prepare("SELECT value FROM sync_metadata WHERE key = 'data_revision'").get();
+      const snapRevision = Number(snapRevisionRow?.value || 1);
+      const hasGrown = hasSnapshotGrownBeyondCurrentBaseline(
+        {
+          games: currentCounts.games,
+          totalPlayers: currentTotalPlayers,
+          categories: currentCounts.categories,
+          leaderboard: currentCounts.leaderboard,
+          users: currentCounts.users,
+          testimonials: currentCounts.testimonials,
+          certificates: currentCounts.certificates,
+          accessLogs: currentCounts.accessLogs,
+          revision: currentRevision
+        },
+        {
+          games: snapGamesCount,
+          totalPlayers: snapTotalPlayers,
+          categories: snapCategoriesCount,
+          leaderboard: snapLeaderboardCount,
+          users: snapUsersCount,
+          testimonials: snapTestimonialsCount,
+          certificates: snapCertificatesCount,
+          accessLogs: snapAccessLogsCount,
+          revision: snapRevision
+        }
+      );
+      if (!hasGrown) return;
+      const snapGames = snapDb.prepare("SELECT * FROM games").all();
+      for (const sg of snapGames) {
+        const existingGame = db.prepare("SELECT id, players, updated_at FROM games WHERE LOWER(TRIM(title)) = LOWER(TRIM(?))").get(String(sg.title || ""));
+        if (existingGame) {
+          const maxPlayers = Math.max(Number(existingGame.players || 0), Number(sg.players || 0));
+          if (maxPlayers > Number(existingGame.players || 0)) {
+            db.prepare("UPDATE games SET players = ? WHERE id = ?").run(maxPlayers, existingGame.id);
+          }
+        } else if (sg.title) {
+          db.prepare(`
+            INSERT INTO games (
+              title, slug, category, difficulty, type, rating, players,
+              thumbnail, icon, description, is_premium, is_active, html5_code, url, status, featured
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            String(sg.title),
+            String(sg.slug || "game"),
+            String(sg.category || "Umum"),
+            String(sg.difficulty || "Mudah"),
+            String(sg.type || "html5"),
+            Number(sg.rating ?? 4.9),
+            Number(sg.players ?? 0),
+            sg.thumbnail ?? "",
+            sg.icon ?? "",
+            String(sg.description || ""),
+            Number(sg.is_premium ?? 0),
+            Number(sg.is_active ?? 1),
+            sg.html5_code ?? null,
+            sg.url ?? null,
+            String(sg.status || "published"),
+            Number(sg.featured ?? 0)
+          );
+        }
+      }
+      const snapAccessLogs = snapDb.prepare("SELECT * FROM game_access_logs").all();
+      for (const sal of snapAccessLogs) {
+        const dup = db.prepare(
+          "SELECT id FROM game_access_logs WHERE LOWER(TRIM(user_name)) = LOWER(TRIM(?)) AND LOWER(TRIM(game_title)) = LOWER(TRIM(?)) AND created_at = ?"
+        ).get(String(sal.user_name || ""), String(sal.game_title || ""), String(sal.created_at || ""));
+        if (!dup && sal.game_title && sal.user_name) {
+          db.prepare(`
+            INSERT INTO game_access_logs (
+              game_id, game_title, game_category, user_id, user_name, user_role,
+              ip_address, device_type, device_model, browser, os, screen_resolution,
+              country, country_code, city, user_agent, duration_seconds, completed, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            sal.game_id ?? null,
+            String(sal.game_title),
+            sal.game_category ?? "Umum",
+            sal.user_id ?? null,
+            String(sal.user_name),
+            String(sal.user_role || "tamu"),
+            String(sal.ip_address || "127.0.0.1"),
+            String(sal.device_type || "Desktop PC"),
+            String(sal.device_model || "Desktop PC"),
+            String(sal.browser || "Browser Web"),
+            String(sal.os || "OS"),
+            sal.screen_resolution ?? null,
+            String(sal.country || "Indonesia"),
+            String(sal.country_code || "ID"),
+            String(sal.city || "Nusantara"),
+            String(sal.user_agent || ""),
+            Number(sal.duration_seconds || 0),
+            Number(sal.completed ? 1 : 0),
+            String(sal.created_at || (/* @__PURE__ */ new Date()).toISOString())
+          );
+        }
+      }
+      if (snapRevision > currentRevision) {
+        upsertSyncMetadata("data_revision", String(snapRevision));
+      }
+    } finally {
+      snapDb.close();
+    }
+  } catch (err) {
+    console.warn("Baseline forward reconciliation skipped:", err.message);
+  }
+}
 function seedDatabase() {
   healMalformedAccessLogsIfNeeded();
+  reconcileGrowingBaselineOnStartup();
   pruneInactiveLeaderboardScores();
   pruneDummyLogsAndSyncRealAccess();
   const seedFlagRow = db.prepare("SELECT value FROM sync_metadata WHERE key = 'initial_seed_completed'").get();
@@ -1478,9 +2048,57 @@ function seedDatabase() {
   db.prepare("INSERT OR IGNORE INTO sync_metadata (key, value) VALUES ('initial_seed_completed', '1')").run();
   db.prepare("INSERT OR IGNORE INTO sync_metadata (key, value) VALUES ('baseline_protection', 'enabled')").run();
   db.prepare("INSERT OR IGNORE INTO sync_metadata (key, value) VALUES ('baseline_established_at', ?)").run((/* @__PURE__ */ new Date()).toISOString());
+  db.prepare("INSERT OR IGNORE INTO sync_metadata (key, value) VALUES ('baseline_auto_sync_enabled', '1')").run();
+  db.prepare("INSERT OR IGNORE INTO sync_metadata (key, value) VALUES ('published_sync_url', ?)").run(
+    process.env.PUBLISHED_APP_URL || DEFAULT_PUBLISHED_SYNC_URL
+  );
   ensureAutoBaselineSnapshotOnStartup();
 }
 seedDatabase();
+
+// src/utils/apiResponse.ts
+function parseDataImageUri(value) {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  const match = /^data:(image\/[a-zA-Z0-9.+-]+);base64,([\s\S]+)$/.exec(trimmed);
+  if (!match) return null;
+  const mimeType = match[1].toLowerCase();
+  const base64Body = match[2].replace(/\s+/g, "");
+  if (!base64Body) return null;
+  try {
+    if (typeof Buffer !== "undefined") {
+      const buf = Buffer.from(base64Body, "base64");
+      if (buf.length === 0) return null;
+      return { mimeType, buffer: buf };
+    }
+    const binary = atob(base64Body);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i += 1) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    if (bytes.length === 0) return null;
+    return { mimeType, buffer: bytes };
+  } catch {
+    return null;
+  }
+}
+function isInternalMediaProxyUrl(value) {
+  if (typeof value !== "string") return false;
+  const trimmed = value.trim();
+  return /^\/api\/v1\/games\/\d+\/(thumbnail|icon)(\?.*)?$/i.test(trimmed) || /^\/api\/v1\/settings\/hero-image(\?.*)?$/i.test(trimmed);
+}
+function buildMediaVersionTag(mediaValue, updatedAt) {
+  const len = mediaValue.length;
+  const head = mediaValue.slice(0, 24);
+  const tail = mediaValue.slice(-24);
+  let hash = 2166136261;
+  const sample = `${len}:${head}:${tail}:${String(updatedAt || "")}`;
+  for (let i = 0; i < sample.length; i += 1) {
+    hash ^= sample.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return `${len}-${(hash >>> 0).toString(36)}`;
+}
 
 // server.ts
 var __filename = fileURLToPath(import.meta.url);
@@ -1519,8 +2137,33 @@ function bumpDataRevision() {
   }
   return nextRev;
 }
+var pendingBaselineEvolutionTimer = null;
+function scheduleDynamicBaselineEvolution(growthReason) {
+  try {
+    upsertSyncMetadata("baseline_last_growth_reason", growthReason);
+  } catch {
+  }
+  if (pendingBaselineEvolutionTimer) {
+    clearTimeout(pendingBaselineEvolutionTimer);
+  }
+  pendingBaselineEvolutionTimer = setTimeout(() => {
+    pendingBaselineEvolutionTimer = null;
+    try {
+      ensureAutoBaselineSnapshotOnStartup(true, growthReason);
+      const statusPayload = getBaselineStatusPayload();
+      broadcastEvent("baseline:synced", statusPayload);
+    } catch (err) {
+      console.warn("Dynamic baseline evolution error:", err.message);
+    }
+  }, 1500);
+}
 function broadcastEvent(event, data) {
-  const revision = event === "connected" ? getDataRevision() : bumpDataRevision();
+  const isMutation = event !== "connected" && event !== "baseline:synced";
+  const revision = isMutation ? bumpDataRevision() : getDataRevision();
+  if (isMutation) {
+    const growthReason = resolveBaselineGrowthReason(event, data);
+    scheduleDynamicBaselineEvolution(growthReason);
+  }
   const enriched = typeof data === "object" && data !== null && !Array.isArray(data) ? { ...data, revision } : { value: data, revision };
   const payload = `event: ${event}
 data: ${JSON.stringify(enriched)}
@@ -1645,6 +2288,10 @@ app.get("/api/v1/stats/overview", (_req, res) => {
     const totalPlayersSum = db.prepare("SELECT SUM(players) as sum FROM games").get().sum || 0;
     const totalLeaderboardEntries = db.prepare("SELECT COUNT(*) as count FROM leaderboard").get().count;
     const totalCertificates = db.prepare("SELECT COUNT(*) as count FROM certificates WHERE is_active = 1 AND (status IS NULL OR status != 'inactive')").get().count;
+    const totalCountries = Number(db.prepare("SELECT COUNT(DISTINCT country) as c FROM game_access_logs").get()?.c || 1);
+    const totalUniqueVisitors = Number(db.prepare("SELECT COUNT(DISTINCT ip_address) as c FROM game_access_logs").get()?.c || 1);
+    const totalAccessSessions = Number(db.prepare("SELECT COUNT(*) as c FROM game_access_logs").get()?.c || 0);
+    const baselineRevision = getDataRevision();
     res.json({
       success: true,
       data: {
@@ -1652,19 +2299,64 @@ app.get("/api/v1/stats/overview", (_req, res) => {
         totalCategories,
         totalPlayers: totalPlayersSum,
         totalLeaderboardEntries,
-        totalCertificates
+        totalCertificates,
+        totalCountries: Math.max(1, totalCountries),
+        totalUniqueVisitors: Math.max(1, totalUniqueVisitors),
+        totalAccessSessions,
+        baselineRevision
       }
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+function resolvePublicMediaUrl(storedValue, proxyPath, updatedAt) {
+  const raw = typeof storedValue === "string" ? storedValue.trim() : "";
+  if (!raw) return "";
+  if (raw.length > 2048 && parseDataImageUri(raw)) {
+    const versionTag = buildMediaVersionTag(raw, updatedAt);
+    return `${proxyPath}?v=${encodeURIComponent(versionTag)}`;
+  }
+  return raw;
+}
+function sendBinaryOrRedirectMedia(res, storedValue, fallbackLabel) {
+  const raw = typeof storedValue === "string" ? storedValue.trim() : "";
+  if (!raw) {
+    res.status(404).json({ success: false, message: `${fallbackLabel} tidak ditemukan` });
+    return;
+  }
+  const parsed = parseDataImageUri(raw);
+  if (parsed) {
+    res.setHeader("Content-Type", parsed.mimeType);
+    res.setHeader("Cache-Control", "public, max-age=3600, stale-while-revalidate=86400");
+    res.setHeader("Content-Length", String(parsed.buffer.byteLength));
+    res.end(Buffer.from(parsed.buffer));
+    return;
+  }
+  if (/^https?:\/\//i.test(raw)) {
+    res.redirect(302, raw);
+    return;
+  }
+  res.status(404).json({ success: false, message: `${fallbackLabel} bukan gambar valid` });
+}
+app.get("/api/v1/settings/hero-image", (_req, res) => {
+  try {
+    const row = db.prepare("SELECT value FROM site_settings WHERE key = 'imageUrl'").get();
+    sendBinaryOrRedirectMedia(res, row?.value, "Logo hero");
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 app.get("/api/v1/settings", (_req, res) => {
   try {
-    const rows = db.prepare("SELECT key, value FROM site_settings").all();
+    const rows = db.prepare("SELECT key, value, updated_at FROM site_settings").all();
     const settings = {};
     rows.forEach((r) => {
-      settings[r.key] = r.value;
+      if (r.key === "imageUrl") {
+        settings[r.key] = resolvePublicMediaUrl(r.value, "/api/v1/settings/hero-image", r.updated_at);
+      } else {
+        settings[r.key] = r.value;
+      }
     });
     res.json({ success: true, data: settings });
   } catch (error) {
@@ -1681,10 +2373,18 @@ app.post("/api/v1/settings", (req, res) => {
     if (title !== void 0) updateStmt.run("title", title);
     if (subtitle !== void 0) updateStmt.run("subtitle", subtitle);
     if (emoji !== void 0) updateStmt.run("emoji", emoji);
-    if (imageUrl !== void 0) updateStmt.run("imageUrl", imageUrl);
+    if (imageUrl !== void 0 && !isInternalMediaProxyUrl(imageUrl)) {
+      updateStmt.run("imageUrl", imageUrl);
+    }
     if (announcement !== void 0) updateStmt.run("announcement", announcement);
+    const updatedImageRow = db.prepare("SELECT value, updated_at FROM site_settings WHERE key = 'imageUrl'").get();
+    const publicImageUrl = resolvePublicMediaUrl(
+      updatedImageRow?.value,
+      "/api/v1/settings/hero-image",
+      updatedImageRow?.updated_at
+    );
     recordAudit("Admin", "UPDATE_SETTINGS", `Updated Hero banner settings: ${title}`);
-    broadcastEvent("settings:updated", { title, subtitle, emoji, imageUrl, announcement });
+    broadcastEvent("settings:updated", { title, subtitle, emoji, imageUrl: publicImageUrl, announcement });
     res.json({ success: true, message: "Pengaturan beranda berhasil disimpan!" });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
@@ -1802,8 +2502,9 @@ app.delete("/api/v1/categories/:id", (req, res) => {
 });
 app.get("/api/v1/games", (req, res) => {
   try {
-    const { category, difficulty, type, search } = req.query;
-    let query = "SELECT * FROM games WHERE 1=1";
+    const { category, difficulty, type, search, includeCode } = req.query;
+    const shouldIncludeCode = includeCode === "1" || includeCode === "true";
+    let query = shouldIncludeCode ? "SELECT * FROM games WHERE 1=1" : "SELECT id, title, slug, category, difficulty, type, rating, players, thumbnail, icon, description, is_premium, is_active, status, url, featured, created_at, updated_at, CASE WHEN html5_code IS NOT NULL AND LENGTH(html5_code) > 0 THEN 1 ELSE 0 END AS has_html5_code FROM games WHERE 1=1";
     const params = [];
     if (category && category !== "all" && typeof category === "string") {
       query += " AND category = ?";
@@ -1823,28 +2524,50 @@ app.get("/api/v1/games", (req, res) => {
     }
     query += " ORDER BY featured DESC, id DESC";
     const games = db.prepare(query).all(...params);
-    const formatted = games.map((g) => ({
-      id: g.id,
-      title: g.title,
-      slug: g.slug,
-      category: g.category,
-      difficulty: g.difficulty,
-      type: g.type,
-      rating: g.rating,
-      players: g.players,
-      thumbnail: g.thumbnail || "",
-      icon: g.icon || "",
-      description: g.description,
-      isPremium: Boolean(g.is_premium),
-      isActive: g.is_active === 0 || g.status === "inactive" ? false : true,
-      status: g.status || (g.is_active === 0 ? "inactive" : "published"),
-      html5Code: g.html5_code,
-      url: g.url,
-      featured: Boolean(g.featured),
-      createdAt: g.created_at,
-      updatedAt: g.updated_at
-    }));
+    const formatted = games.map((g) => {
+      const gameId = Number(g.id);
+      return {
+        id: gameId,
+        title: g.title,
+        slug: g.slug,
+        category: g.category,
+        difficulty: g.difficulty,
+        type: g.type,
+        rating: g.rating,
+        players: g.players,
+        thumbnail: resolvePublicMediaUrl(g.thumbnail, `/api/v1/games/${gameId}/thumbnail`, g.updated_at),
+        icon: resolvePublicMediaUrl(g.icon, `/api/v1/games/${gameId}/icon`, g.updated_at),
+        description: g.description,
+        isPremium: Boolean(g.is_premium),
+        isActive: g.is_active === 0 || g.status === "inactive" ? false : true,
+        status: g.status || (g.is_active === 0 ? "inactive" : "published"),
+        html5Code: shouldIncludeCode ? g.html5_code : void 0,
+        hasHtml5Code: shouldIncludeCode ? Boolean(g.html5_code) : Boolean(g.has_html5_code),
+        url: g.url,
+        featured: Boolean(g.featured),
+        createdAt: g.created_at,
+        updatedAt: g.updated_at
+      };
+    });
     res.json({ success: true, data: formatted });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+app.get("/api/v1/games/:id/thumbnail", (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const row = db.prepare("SELECT thumbnail FROM games WHERE id = ?").get(id);
+    sendBinaryOrRedirectMedia(res, row?.thumbnail, "Thumbnail game");
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
+app.get("/api/v1/games/:id/icon", (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const row = db.prepare("SELECT icon FROM games WHERE id = ?").get(id);
+    sendBinaryOrRedirectMedia(res, row?.icon, "Ikon game");
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
@@ -1857,10 +2580,11 @@ app.get("/api/v1/games/:id", (req, res) => {
       res.status(404).json({ success: false, message: "Permainan tidak ditemukan" });
       return;
     }
+    const gameId = Number(g.id);
     res.json({
       success: true,
       data: {
-        id: g.id,
+        id: gameId,
         title: g.title,
         slug: g.slug,
         category: g.category,
@@ -1868,15 +2592,17 @@ app.get("/api/v1/games/:id", (req, res) => {
         type: g.type,
         rating: g.rating,
         players: g.players,
-        thumbnail: g.thumbnail || "",
-        icon: g.icon || "",
+        thumbnail: resolvePublicMediaUrl(g.thumbnail, `/api/v1/games/${gameId}/thumbnail`, g.updated_at),
+        icon: resolvePublicMediaUrl(g.icon, `/api/v1/games/${gameId}/icon`, g.updated_at),
         description: g.description,
         isPremium: Boolean(g.is_premium),
         isActive: g.is_active === 0 || g.status === "inactive" ? false : true,
         status: g.status || (g.is_active === 0 ? "inactive" : "published"),
         html5Code: g.html5_code,
         url: g.url,
-        featured: Boolean(g.featured)
+        featured: Boolean(g.featured),
+        createdAt: g.created_at,
+        updatedAt: g.updated_at
       }
     });
   } catch (error) {
@@ -1992,8 +2718,8 @@ app.put("/api/v1/games/:id", (req, res) => {
         icon: existing.icon || ""
       },
       {
-        thumbnail: thumbnail !== void 0 ? String(thumbnail) : void 0,
-        icon: icon !== void 0 ? String(icon) : void 0
+        thumbnail: thumbnail !== void 0 && !isInternalMediaProxyUrl(thumbnail) ? String(thumbnail) : void 0,
+        icon: icon !== void 0 && !isInternalMediaProxyUrl(icon) ? String(icon) : void 0
       }
     );
     let syncedCategory = String(existing.category);
@@ -2026,10 +2752,11 @@ app.put("/api/v1/games/:id", (req, res) => {
         id
       );
       if (nextTitle !== String(existing.title)) {
-        db.prepare("UPDATE leaderboard SET game_title = ? WHERE game_id = ? OR game_title = ?").run(nextTitle, id, String(existing.title));
+        db.prepare("UPDATE leaderboard SET game_title = ? WHERE game_id = ? OR LOWER(TRIM(game_title)) = LOWER(TRIM(?))").run(nextTitle, id, String(existing.title));
+        db.prepare("UPDATE testimonials SET game = ? WHERE LOWER(TRIM(game)) = LOWER(TRIM(?))").run(nextTitle, String(existing.title));
       }
       if (nextTitle !== String(existing.title) || syncedCategory !== String(existing.category)) {
-        db.prepare("UPDATE game_access_logs SET game_title = ?, game_category = ? WHERE game_id = ?").run(nextTitle, syncedCategory, id);
+        db.prepare("UPDATE game_access_logs SET game_id = ?, game_title = ?, game_category = ? WHERE game_id = ? OR LOWER(TRIM(game_title)) = LOWER(TRIM(?))").run(id, nextTitle, syncedCategory, id, String(existing.title));
       }
       db.exec("COMMIT");
     } catch (txErr) {
@@ -2055,8 +2782,8 @@ app.put("/api/v1/games/:id", (req, res) => {
       id,
       title: nextTitle,
       category: syncedCategory,
-      thumbnail: mergedMedia.thumbnail,
-      icon: mergedMedia.icon,
+      thumbnail: resolvePublicMediaUrl(mergedMedia.thumbnail, `/api/v1/games/${id}/thumbnail`),
+      icon: resolvePublicMediaUrl(mergedMedia.icon, `/api/v1/games/${id}/icon`),
       isActive: Boolean(newIsActive),
       status: newStatus
     });
@@ -2819,42 +3546,103 @@ function parseDeviceInfo(uaString) {
   }
   return { deviceType, deviceModel, browser, os: os2 };
 }
-function resolveClientLocation(req, clientTz) {
-  const cfCountry = req.headers["cf-ipcountry"];
-  const gcpCountry = req.headers["x-appengine-country"] || req.headers["x-country-code"];
-  const code = (cfCountry || gcpCountry || "").toUpperCase();
-  const countryNames = {
-    ID: "Indonesia",
-    SG: "Singapura",
-    MY: "Malaysia",
-    TH: "Thailand",
-    VN: "Vietnam",
-    PH: "Filipina",
-    US: "Amerika Serikat",
-    AU: "Australia",
-    JP: "Jepang",
-    KR: "Korea Selatan",
-    TW: "Taiwan",
-    CN: "Tiongkok",
-    IN: "India",
-    GB: "Inggris",
-    DE: "Jerman",
-    NL: "Belanda"
-  };
-  if (code && countryNames[code]) {
-    return { country: countryNames[code], code, city: req.headers["x-appengine-city"] || "Online" };
-  }
-  if (clientTz) {
-    if (clientTz.includes("Jakarta") || clientTz.includes("Makassar") || clientTz.includes("Jayapura") || clientTz.includes("Pontianak") || clientTz.includes("Asia/Jakarta")) {
-      return { country: "Indonesia", code: "ID", city: clientTz.split("/")[1] || "Indonesia" };
-    }
-    if (clientTz.includes("Singapore")) return { country: "Singapura", code: "SG", city: "Singapore" };
-    if (clientTz.includes("Kuala_Lumpur")) return { country: "Malaysia", code: "MY", city: "Kuala Lumpur" };
-    if (clientTz.includes("Bangkok")) return { country: "Thailand", code: "TH", city: "Bangkok" };
-    if (clientTz.includes("Tokyo")) return { country: "Jepang", code: "JP", city: "Tokyo" };
-  }
-  return { country: "Indonesia", code: "ID", city: "Nusantara" };
+function resolveClientLocation(req, clientTz, clientLang) {
+  const countryHeader = req.headers["cf-ipcountry"] || req.headers["x-appengine-country"] || req.headers["x-country-code"] || req.headers["x-vercel-ip-country"] || "";
+  const cityHeader = req.headers["cf-ipcity"] || req.headers["x-appengine-city"] || req.headers["x-vercel-ip-city"] || "";
+  const acceptLanguage = clientLang || req.headers["accept-language"] || "";
+  return resolveWorldwideClientLocation({
+    countryHeader,
+    cityHeader,
+    timezone: clientTz,
+    acceptLanguage
+  });
 }
+app.post("/api/v1/analytics/site-visit", (req, res) => {
+  try {
+    const { user, clientInfo } = req.body || {};
+    const uaString = String(req.headers["user-agent"] || "");
+    const { deviceType, deviceModel, browser, os: os2 } = parseDeviceInfo(uaString);
+    const { country, code: countryCode, city } = resolveClientLocation(
+      req,
+      clientInfo?.timezone,
+      clientInfo?.language
+    );
+    const cfIp = req.headers["cf-connecting-ip"];
+    const forwarded = req.headers["x-forwarded-for"];
+    const realIp = req.headers["x-real-ip"];
+    const ipAddress = normalizeClientIp(cfIp || forwarded || realIp || req.socket.remoteAddress || "127.0.0.1");
+    const userId = user?.id || null;
+    const userName = user?.name ? String(user.name).trim() : "Tamu Dharma";
+    const userRole = user?.role || (user?.id ? "user" : "tamu");
+    const screenRes = clientInfo?.screen || null;
+    if (isDummyAccessLog({
+      gameId: null,
+      gameTitle: PORTAL_VISIT_GAME_TITLE,
+      userName,
+      userAgent: uaString
+    })) {
+      res.json({
+        success: true,
+        skippedDummy: true,
+        detected: { deviceType, deviceModel, browser, os: os2, country, countryCode, city, ipAddress }
+      });
+      return;
+    }
+    const recentVisit = db.prepare(`
+        SELECT id FROM game_access_logs
+        WHERE ip_address = ?
+          AND LOWER(TRIM(user_name)) = LOWER(TRIM(?))
+          AND created_at >= datetime('now', '-30 minutes')
+        ORDER BY id DESC
+        LIMIT 1
+      `).get(ipAddress, userName);
+    if (recentVisit) {
+      res.json({
+        success: true,
+        logId: recentVisit.id,
+        deduplicated: true,
+        detected: { deviceType, deviceModel, browser, os: os2, country, countryCode, city, ipAddress }
+      });
+      return;
+    }
+    const info = db.prepare(`
+      INSERT INTO game_access_logs (
+        game_id, game_title, game_category, user_id, user_name, user_role,
+        ip_address, device_type, device_model, browser, os, screen_resolution,
+        country, country_code, city, user_agent, duration_seconds, completed
+      ) VALUES (NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 15, 1)
+    `).run(
+      PORTAL_VISIT_GAME_TITLE,
+      PORTAL_VISIT_CATEGORY,
+      userId,
+      userName,
+      userRole,
+      ipAddress,
+      deviceType,
+      deviceModel,
+      browser,
+      os2,
+      screenRes,
+      country,
+      countryCode,
+      city,
+      uaString.slice(0, 255)
+    );
+    broadcastEvent("stats:updated", {
+      gameTitle: PORTAL_VISIT_GAME_TITLE,
+      country,
+      countryCode,
+      logId: Number(info.lastInsertRowid)
+    });
+    res.json({
+      success: true,
+      logId: Number(info.lastInsertRowid),
+      detected: { deviceType, deviceModel, browser, os: os2, country, countryCode, city, ipAddress }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: error.message });
+  }
+});
 app.post("/api/v1/analytics/game-access", (req, res) => {
   try {
     const { gameId, gameTitle, gameCategory, user, clientInfo } = req.body;
@@ -2864,7 +3652,11 @@ app.post("/api/v1/analytics/game-access", (req, res) => {
     }
     const uaString = String(req.headers["user-agent"] || "");
     const { deviceType, deviceModel, browser, os: os2 } = parseDeviceInfo(uaString);
-    const { country, code: countryCode, city } = resolveClientLocation(req, clientInfo?.timezone);
+    const { country, code: countryCode, city } = resolveClientLocation(
+      req,
+      clientInfo?.timezone,
+      clientInfo?.language
+    );
     const cfIp = req.headers["cf-connecting-ip"];
     const forwarded = req.headers["x-forwarded-for"];
     const realIp = req.headers["x-real-ip"];
@@ -2936,7 +3728,13 @@ app.post("/api/v1/analytics/game-access", (req, res) => {
     if (canonicalGameId) {
       db.prepare("UPDATE games SET players = players + 1 WHERE id = ?").run(canonicalGameId);
     }
-    broadcastEvent("stats:updated", { gameId: canonicalGameId, gameTitle: canonicalGameTitle, logId: Number(info.lastInsertRowid) });
+    broadcastEvent("stats:updated", {
+      gameId: canonicalGameId,
+      gameTitle: canonicalGameTitle,
+      country,
+      countryCode,
+      logId: Number(info.lastInsertRowid)
+    });
     res.json({
       success: true,
       logId: Number(info.lastInsertRowid),
@@ -3237,6 +4035,26 @@ function buildCurrentBackupPayload() {
     school: u.school || "",
     role: u.role || "user"
   }));
+  const accessLogs = db.prepare("SELECT * FROM game_access_logs ORDER BY id ASC").all().map((al) => ({
+    gameTitle: al.game_title,
+    gameCategory: al.game_category || "Umum",
+    userId: al.user_id || null,
+    userName: al.user_name,
+    userRole: al.user_role || "tamu",
+    ipAddress: al.ip_address || "127.0.0.1",
+    deviceType: al.device_type || "Desktop PC",
+    deviceModel: al.device_model || "Desktop PC",
+    browser: al.browser || "Browser Web",
+    os: al.os || "OS",
+    screenResolution: al.screen_resolution || "",
+    country: al.country || "Indonesia",
+    countryCode: al.country_code || "ID",
+    city: al.city || "Nusantara",
+    userAgent: al.user_agent || "",
+    durationSeconds: Number(al.duration_seconds || 0),
+    completed: Boolean(al.completed),
+    createdAt: al.created_at
+  }));
   const payload = {
     version: "1.0",
     exportedAt: (/* @__PURE__ */ new Date()).toISOString(),
@@ -3248,7 +4066,8 @@ function buildCurrentBackupPayload() {
       testimonials,
       licenses,
       leaderboard,
-      users
+      users,
+      accessLogs
     }
   };
   return {
@@ -3275,15 +4094,16 @@ function readBackupDataFromSqliteFile(sqliteFilePath) {
         testimonials: safeAll("testimonials"),
         licenses: safeAll("licenses"),
         leaderboard: safeAll("leaderboard"),
-        users: rawUsers
+        users: rawUsers,
+        accessLogs: safeAll("game_access_logs")
       }
     });
   } finally {
     extDb.close();
   }
 }
-function executeNormalizedBackupImport(parsed, mode, sourceLabel) {
-  const safetySnapshot = createSafetySnapshotInBackupDir(`pre-${mode}`);
+function executeNormalizedBackupImport(parsed, mode, sourceLabel, options) {
+  const safetySnapshot = options?.skipSafetySnapshot ? ensureAutoBaselineSnapshotOnStartup(false) || "auto-baseline" : createSafetySnapshotInBackupDir(`pre-${mode}`);
   db.exec("BEGIN IMMEDIATE");
   try {
     if (mode === "replace") {
@@ -3472,6 +4292,55 @@ function executeNormalizedBackupImport(parsed, mode, sourceLabel) {
         `).run(u.id, u.name, u.email, u.avatar, u.xp, u.badge, u.level, u.school, u.role, "dharma123");
       }
     }
+    if (Array.isArray(parsed.accessLogs) && parsed.accessLogs.length > 0) {
+      for (const al of parsed.accessLogs) {
+        if (isDummyAccessLog({
+          gameTitle: al.gameTitle,
+          userName: al.userName,
+          userAgent: al.userAgent
+        })) {
+          continue;
+        }
+        const matchedGame = db.prepare("SELECT id, title, category FROM games WHERE LOWER(TRIM(title)) = LOWER(TRIM(?)) AND is_active = 1 AND (status IS NULL OR status != 'inactive') LIMIT 1").get(al.gameTitle);
+        const isPortalVisit = al.gameTitle.toLowerCase() === PORTAL_VISIT_GAME_TITLE.toLowerCase();
+        if (!matchedGame && !isPortalVisit) continue;
+        const canonicalTitle = matchedGame ? matchedGame.title : PORTAL_VISIT_GAME_TITLE;
+        const canonicalCat = matchedGame ? matchedGame.category : PORTAL_VISIT_CATEGORY;
+        const canonicalGameId = matchedGame ? matchedGame.id : null;
+        const dupLog = db.prepare(
+          "SELECT id FROM game_access_logs WHERE LOWER(TRIM(user_name)) = LOWER(TRIM(?)) AND LOWER(TRIM(game_title)) = LOWER(TRIM(?)) AND created_at = ?"
+        ).get(al.userName, canonicalTitle, al.createdAt);
+        if (!dupLog) {
+          db.prepare(`
+            INSERT INTO game_access_logs (
+              game_id, game_title, game_category, user_id, user_name, user_role,
+              ip_address, device_type, device_model, browser, os, screen_resolution,
+              country, country_code, city, user_agent, duration_seconds, completed, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            canonicalGameId,
+            canonicalTitle,
+            canonicalCat,
+            al.userId,
+            al.userName,
+            al.userRole,
+            normalizeClientIp(al.ipAddress),
+            al.deviceType,
+            al.deviceModel,
+            al.browser,
+            al.os,
+            al.screenResolution || null,
+            al.country,
+            al.countryCode,
+            al.city,
+            al.userAgent,
+            al.durationSeconds,
+            al.completed ? 1 : 0,
+            al.createdAt
+          );
+        }
+      }
+    }
     pruneDummyLogsAndSyncRealAccess();
     db.exec("COMMIT");
   } catch (err) {
@@ -3482,11 +4351,13 @@ function executeNormalizedBackupImport(parsed, mode, sourceLabel) {
     throw err;
   }
   const importedCounts = summarizeBackupPayload(parsed);
-  recordAudit(
-    "Admin",
-    "IMPORT_BACKUP",
-    `Import backup (${mode}) dari ${sourceLabel}: ${importedCounts.games} game, ${importedCounts.categories} kategori, ${importedCounts.certificates} sertifikat. Snapshot pengaman: ${safetySnapshot}`
-  );
+  if (!options?.silentAudit) {
+    recordAudit(
+      "Admin",
+      "IMPORT_BACKUP",
+      `Import backup (${mode}) dari ${sourceLabel}: ${importedCounts.games} game, ${importedCounts.categories} kategori, ${importedCounts.certificates} sertifikat. Snapshot pengaman: ${safetySnapshot}`
+    );
+  }
   broadcastEvent("backup:imported", { mode, imported: importedCounts, safetySnapshot });
   return {
     safetySnapshot,
@@ -3668,43 +4539,93 @@ app.post("/api/v1/backup/snapshots/:filename/restore", (req, res) => {
     res.status(400).json({ success: false, message: error.message });
   }
 });
+var isRunningAutoBaselineSync = false;
+async function runAutoBaselineSyncCycle(options) {
+  if (isRunningAutoBaselineSync) {
+    return getBaselineStatusPayload();
+  }
+  isRunningAutoBaselineSync = true;
+  try {
+    if (options?.publishedSyncUrl !== void 0) {
+      const trimmed = String(options.publishedSyncUrl).trim();
+      if (trimmed) {
+        const cleanUrl = validatePublishedSyncUrl(trimmed);
+        upsertSyncMetadata("published_sync_url", cleanUrl);
+      }
+    }
+    if (options?.autoSyncEnabled !== void 0) {
+      upsertSyncMetadata("baseline_auto_sync_enabled", options.autoSyncEnabled ? "1" : "0");
+    }
+    const isAutoEnabled = getSyncMetadataValue("baseline_auto_sync_enabled") !== "0";
+    if (!isAutoEnabled && !options?.forceSnapshot) {
+      return getBaselineStatusPayload();
+    }
+    pruneInactiveLeaderboardScores();
+    pruneDummyLogsAndSyncRealAccess();
+    const configuredUrl = getSyncMetadataValue("published_sync_url") || "";
+    if (configuredUrl && !/localhost|127\.0\.0\.1/i.test(configuredUrl)) {
+      try {
+        const cleanUrl = validatePublishedSyncUrl(configuredUrl);
+        const resp = await fetch(`${cleanUrl}/api/v1/backup/export`, {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            "Cache-Control": "no-cache"
+          },
+          signal: AbortSignal.timeout(5e3)
+        });
+        const contentType = String(resp.headers.get("content-type") || "").toLowerCase();
+        if (resp.ok && contentType.includes("application/json")) {
+          const rawJson = await resp.json();
+          const payloadCandidate = rawJson?.data && rawJson?.success === true ? rawJson.data : rawJson;
+          const parsed = parseBackupPayload(payloadCandidate);
+          executeNormalizedBackupImport(parsed, "merge", `Auto-Sync Baseline 1 Menit (${cleanUrl})`, {
+            skipSafetySnapshot: true,
+            silentAudit: true
+          });
+        }
+      } catch {
+      }
+    }
+    ensureAutoBaselineSnapshotOnStartup(Boolean(options?.forceSnapshot));
+    const statusPayload = getBaselineStatusPayload();
+    broadcastEvent("baseline:synced", statusPayload);
+    return statusPayload;
+  } finally {
+    isRunningAutoBaselineSync = false;
+  }
+}
 app.get("/api/v1/backup/baseline-status", (_req, res) => {
   try {
-    ensureAutoBaselineSnapshotOnStartup();
-    const metaRows = db.prepare("SELECT key, value FROM sync_metadata WHERE key IN ('baseline_protection', 'initial_seed_completed', 'baseline_established_at')").all();
-    const metaMap = {};
-    for (const r of metaRows) {
-      metaMap[r.key] = r.value;
-    }
-    let latestBaselineSnapshot = null;
-    if (fs2.existsSync(BACKUP_DIR)) {
-      const dbFiles = fs2.readdirSync(BACKUP_DIR).filter((f) => f.endsWith(".db")).map((filename) => {
-        const stats = fs2.statSync(path2.join(BACKUP_DIR, filename));
-        return {
-          filename,
-          sizeBytes: stats.size,
-          createdAt: stats.mtime.toISOString()
-        };
-      }).filter((f) => f.sizeBytes > 0).sort((a, b) => a.createdAt < b.createdAt ? 1 : -1);
-      latestBaselineSnapshot = dbFiles.find((f) => /^auto-baseline_.*\.db$/i.test(f.filename)) || dbFiles[0] || null;
-    }
+    ensureAutoBaselineSnapshotOnStartup(false);
     res.json({
       success: true,
-      data: {
-        protected: metaMap.baseline_protection === "enabled",
-        initialSeedCompleted: metaMap.initial_seed_completed === "1",
-        baselineEstablishedAt: metaMap.baseline_established_at || null,
-        latestBaselineSnapshot,
-        counts: getBaselineDatabaseCounts()
-      }
+      data: getBaselineStatusPayload()
     });
   } catch (error) {
     res.status(500).json({ success: false, message: error.message });
   }
 });
+app.post("/api/v1/backup/baseline-sync", async (req, res) => {
+  try {
+    const status = await runAutoBaselineSyncCycle({
+      forceSnapshot: Boolean(req.body?.forceSnapshot),
+      publishedSyncUrl: req.body?.publishedSyncUrl,
+      autoSyncEnabled: req.body?.autoSyncEnabled
+    });
+    res.json({
+      success: true,
+      message: "Perlindungan Baseline Data Terpublish berhasil disinkronkan!",
+      data: status
+    });
+  } catch (error) {
+    res.status(400).json({ success: false, message: error.message });
+  }
+});
 app.post("/api/v1/backup/sync-from-url", async (req, res) => {
   try {
     const cleanUrl = validatePublishedSyncUrl(String(req.body?.sourceUrl || ""));
+    upsertSyncMetadata("published_sync_url", cleanUrl);
     const mode = req.body?.mode === "replace" ? "replace" : "merge";
     const exportEndpoint = `${cleanUrl}/api/v1/backup/export`;
     const resp = await fetch(exportEndpoint, {
@@ -3717,9 +4638,12 @@ app.post("/api/v1/backup/sync-from-url", async (req, res) => {
     });
     const contentType = String(resp.headers.get("content-type") || "").toLowerCase();
     if (!resp.ok || !contentType.includes("application/json")) {
+      ensureAutoBaselineSnapshotOnStartup(true);
+      const localBaseline = getBaselineStatusPayload();
+      broadcastEvent("baseline:synced", localBaseline);
       res.status(400).json({
         success: false,
-        message: `Gagal menarik data otomatis dari "${cleanUrl}" (HTTP ${resp.status} atau halaman memerlukan autentikasi browser). Silakan buka website terpublish di browser -> Admin Hub -> Tab Backup & Restore -> klik "Unduh Backup JSON" atau "Unduh File SQLite (.db)", lalu impor file tersebut di sini menggunakan Mode Gabungkan (Merge).`
+        message: `URL terpublish "${cleanUrl}" telah disimpan untuk jadwal sinkronisasi otomatis 1 menit, namun penarikan langsung memerlukan sesi login browser (HTTP ${resp.status}). Baseline lokal Anda (${localBaseline.counts.games} game, ${localBaseline.counts.categories} kategori, ${localBaseline.counts.leaderboard} skor) telah diamankan otomatis ke snapshot "${localBaseline.latestBaselineSnapshot?.filename || "auto-baseline"}".`
       });
       return;
     }
@@ -3727,6 +4651,8 @@ app.post("/api/v1/backup/sync-from-url", async (req, res) => {
     const payloadCandidate = rawJson?.data && rawJson?.success === true ? rawJson.data : rawJson;
     const parsed = parseBackupPayload(payloadCandidate);
     const result = executeNormalizedBackupImport(parsed, mode, `Website Terpublish (${cleanUrl})`);
+    ensureAutoBaselineSnapshotOnStartup(true);
+    broadcastEvent("baseline:synced", getBaselineStatusPayload());
     res.json({
       success: true,
       message: `Data dari website terpublish (${cleanUrl}) berhasil ditarik & ${mode === "replace" ? "dipulihkan" : "digabungkan tanpa menghapus data lokal"}! (${result.imported.games} game, ${result.imported.categories} kategori, ${result.imported.users} pengguna)`,
@@ -3738,6 +4664,12 @@ app.post("/api/v1/backup/sync-from-url", async (req, res) => {
     const msg = error.message || "Gagal menyinkronkan dari URL terpublish.";
     res.status(400).json({ success: false, message: msg });
   }
+});
+app.use("/api", (req, res) => {
+  res.status(404).json({
+    success: false,
+    message: `Endpoint API tidak ditemukan: ${req.method} ${req.originalUrl}`
+  });
 });
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
@@ -3754,8 +4686,11 @@ async function startServer() {
       res.sendFile(path2.join(distPath, "index.html"));
     });
   }
+  setInterval(() => {
+    void runAutoBaselineSyncCycle({ forceSnapshot: false });
+  }, AUTO_BASELINE_SYNC_INTERVAL_MS);
   app.listen(PORT, "0.0.0.0", () => {
-    console.log(`[Pusat Games Buddhis] Server running at http://0.0.0.0:${PORT}`);
+    console.log(`[Pusat Games Buddhis] Server running at http://0.0.0.0:${PORT} (Auto-Baseline Sync: every 60s)`);
   });
 }
 startServer().catch((err) => {

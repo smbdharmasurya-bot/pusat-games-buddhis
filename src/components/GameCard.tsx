@@ -38,6 +38,8 @@ export const GameCard: React.FC<GameCardProps> = ({ game, onPlay }) => {
           <img
             src={thumbUrl}
             alt={game.title}
+            loading="lazy"
+            decoding="async"
             onError={() => setImgError(true)}
             referrerPolicy="no-referrer"
             className="w-full h-full object-cover group-hover:scale-105 transition duration-500"
